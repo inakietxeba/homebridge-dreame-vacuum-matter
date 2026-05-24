@@ -4,6 +4,7 @@ import {
   DREAME_STATE,
   DREAME_CLEAN_MODE,
   DREAME_CHARGE_STATUS,
+  DREAME_MAINTENANCE_TYPE,
   SuctionLevel,
   WaterLevel,
 } from './models';
@@ -54,13 +55,14 @@ export class StateParser {
         const runMode = DREAME_STATE[numValue];
         if (runMode) {
           state.activity.runMode = runMode;
-          // States 3 (paused) map to paused
           state.activity.paused = numValue === 3;
           // Clear error if no longer in error state
           if (runMode !== 'error') {
             state.activity.activeError = null;
             state.activity.activeErrorCode = undefined;
           }
+          // Maintenance sub-type
+          state.activity.maintenanceType = DREAME_MAINTENANCE_TYPE[numValue];
           // Docked states
           const dockedStates = [2, 6, 9, 13]; // idle, charging, washing, charge complete
           if (dockedStates.includes(numValue)) {
@@ -119,10 +121,12 @@ export class StateParser {
         break;
       }
       case 23: { // Cleaning mode
-        const mode = DREAME_CLEAN_MODE[value as number];
+        const rawMode = value as number;
+        const mode = DREAME_CLEAN_MODE[rawMode];
         if (mode) {
           state.activity.cleanMode = mode;
         }
+        // Unknown mode values (e.g. 5120 on newer models) — keep current cleanMode unchanged
         break;
       }
     }

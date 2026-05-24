@@ -154,15 +154,14 @@ export class DreameVacuumMatterPlatform implements DynamicPlatformPlugin {
 
       // Build command infrastructure
       const commandBuilder = new CommandBuilder(cloud, deviceId);
-      const handlers = new MatterCommandHandlers(commandBuilder, this.log, this.config.defaultMode);
+      const handlers = new MatterCommandHandlers(commandBuilder, this.log);
+      let accessoryHandler: DreameVacuumAccessory | undefined;
       handlers.setOnCleanModeSelected((mode) => {
-        this.accessoryHandlers.get(uuid)?.applyUserCleanMode(mode);
+        accessoryHandler?.applyUserCleanMode(mode);
       });
 
       const identity: Identity = { deviceId, model: deviceModel, firmware: '1.0' };
-      const initialState = createInitialState(identity, this.config.defaultMode);
-      initialState.activity.suctionLevel = this.config.defaultSuction as 0 | 1 | 2 | 3;
-      initialState.activity.waterLevel = this.config.defaultWaterLevel as 1 | 2 | 3;
+      const initialState = createInitialState(identity);
 
       // Fetch initial properties from cloud
       try {
@@ -183,13 +182,10 @@ export class DreameVacuumMatterPlatform implements DynamicPlatformPlugin {
           Object.assign(initialState, parsed);
         }
       } catch (err: unknown) {
-        this.log.warn(`Failed to fetch initial state for ${deviceName}: ${err instanceof Error ? err.message : String(err)}`);
+        this.log.warn(`Failed to fetch initial state for ${deviceName}, using defaults. Device may not reflect actual state: ${err instanceof Error ? err.message : String(err)}`);
       }
 
-      // Apply room overrides from config
-      if (this.config.rooms.length > 0) {
-        initialState.activity.availableRooms = this.config.rooms.map((r) => ({ id: r.id, name: r.name }));
-      }
+      // Rooms are discovered automatically via MQTT/polling
 
       // Find or create accessory
       let accessory = this.accessories.find((acc) => acc.UUID === uuid);
@@ -211,8 +207,8 @@ export class DreameVacuumMatterPlatform implements DynamicPlatformPlugin {
       if (!setupResult.configured) continue;
 
       // Create accessory handler
-      const accessoryHandler = new DreameVacuumAccessory(this.log.getRaw(), accessory!, initialState, this.api, {
-        disableMatterStatePush: !setupResult.statePushSupported || this.config.disableMatterStatePush === true,
+      accessoryHandler = new DreameVacuumAccessory(this.log.getRaw(), accessory!, initialState, this.api, {
+        disableMatterStatePush: !setupResult.statePushSupported,
         serviceAreaActive: setupResult.serviceAreaActive,
         onRoomsDiscovered: (rooms, knownMaps) => this.handleRoomsDiscovered(uuid, rooms, knownMaps),
       });
@@ -253,6 +249,9 @@ export class DreameVacuumMatterPlatform implements DynamicPlatformPlugin {
         this.log.warn(`No MQTT endpoint for ${deviceName} — state updates via polling only`);
       }
 
+      // Enable HTTP polling backup (adaptive: 15s/60s/180s like original HomeKit plugin)
+      session.setCloud(cloud);
+
       this.deviceSessions.set(uuid, session);
       this.log.info(`Device ${deviceName} (${deviceId}) ready — model: ${deviceModel}`);
     }
@@ -284,25 +283,57 @@ export class DreameVacuumMatterPlatform implements DynamicPlatformPlugin {
       return { configured: false, statePushSupported: false, serviceAreaActive: false };
     }
 
-    // Set up Matter clusters
+    // Set up Matter clusters (lowercase keys for Homebridge v2 Matter API)
     const matterState = MatterClusterMapper.toMatterState(initialState);
-    meta.clusters = matterState as Record<string, Record<string, unknown>>;
+    const clusters: Record<string, Record<string, unknown>> = {};
+    for (const [key, value] of Object.entries(matterState)) {
+      const lowerKey = key.charAt(0).toLowerCase() + key.slice(1);
+      clusters[lowerKey] = value as Record<string, unknown>;
+    }
+    meta.clusters = clusters;
 
-    // Set up Matter handlers
+    // Handler error wrapper — logs errors and re-throws
+    const wrapHandler = <T extends unknown[]>(
+      name: string,
+      fn: (...args: T) => Promise<void>,
+    ): ((...args: T) => Promise<void>) => {
+      return async (...args: T) => {
+        this.log.debug(`Matter command received: ${name}`);
+        try {
+          await fn(...args);
+        } catch (error: unknown) {
+          const message = error instanceof Error ? error.message : String(error);
+          this.log.error(`Matter command ${name} failed: ${message}`);
+          throw error;
+        }
+      };
+    };
+
+    // Set up Matter handlers (lowercase cluster names)
     meta.handlers = {
-      RvcOperationalState: {
-        start: () => handlers.handleStartCommand(initialState.activity.paused),
-        stop: () => handlers.handleStopCommand(),
-        pause: () => handlers.handlePauseCommand(),
-        resume: () => handlers.handleResumeCommand(),
-        goHome: () => handlers.handleGoHomeCommand(),
+      rvcRunMode: {
+        changeToMode: wrapHandler('rvcRunMode.changeToMode', async (request?: { newMode?: number }) => {
+          switch (request?.newMode) {
+            case 0x00: await handlers.handleStopCommand(); return;
+            case 0x01: await handlers.handleStartCommand(false); return;
+            case 0x02: await handlers.handleGoHomeCommand(); return;
+            default: this.log.warn(`Unknown rvcRunMode: ${request?.newMode}`);
+          }
+        }),
       },
-      RvcCleanMode: {
-        changeToMode: (request: { newMode: number }) => {
+      rvcOperationalState: {
+        start: wrapHandler('rvcOperationalState.start', () => handlers.handleStartCommand(false)),
+        stop: wrapHandler('rvcOperationalState.stop', () => handlers.handleStopCommand()),
+        pause: wrapHandler('rvcOperationalState.pause', () => handlers.handlePauseCommand()),
+        resume: wrapHandler('rvcOperationalState.resume', () => handlers.handleResumeCommand()),
+        goHome: wrapHandler('rvcOperationalState.goHome', () => handlers.handleGoHomeCommand()),
+      },
+      rvcCleanMode: {
+        changeToMode: wrapHandler('rvcCleanMode.changeToMode', async (request?: { newMode?: number }) => {
           const modeMap: Record<number, CleaningMode> = { 0: 'SWEEP', 1: 'MOP', 2: 'SWEEP_AND_MOP' };
-          const mode = modeMap[request.newMode];
-          if (mode) return handlers.handleCleaningMode(mode);
-        },
+          const mode = request?.newMode !== undefined ? modeMap[request.newMode] : undefined;
+          if (mode) await handlers.handleCleaningMode(mode);
+        }),
       },
     };
 
@@ -323,6 +354,30 @@ export class DreameVacuumMatterPlatform implements DynamicPlatformPlugin {
       }
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
+
+      // If ServiceArea was active, retry without it (common on first boot)
+      if (serviceAreaActive) {
+        this.log.warn(`Registration failed with ServiceArea (${message}); retrying without...`);
+        delete clusters['serviceArea'];
+        try {
+          if (isNew) {
+            matterApi.configureMatterAccessory?.(accessory);
+            await matterApi.registerPlatformAccessories?.(PLUGIN_NAME, PLATFORM_NAME, [accessory]);
+            this.accessories.push(accessory);
+          } else {
+            matterApi.configureMatterAccessory?.(accessory);
+            await matterApi.updatePlatformAccessories?.([accessory]);
+          }
+          this.log.info(`Registered ${accessory.displayName} without ServiceArea`);
+          const statePushSupported = !!(matterApi as Record<string, unknown>)['updateAccessoryState'];
+          return { configured: true, statePushSupported, serviceAreaActive: false };
+        } catch (retryErr: unknown) {
+          const retryMessage = retryErr instanceof Error ? retryErr.message : String(retryErr);
+          this.log.error(`Registration retry also failed: ${retryMessage}`);
+          return { configured: false, statePushSupported: false, serviceAreaActive: false };
+        }
+      }
+
       this.log.error(`Failed to register/update Matter accessory: ${message}`);
       return { configured: false, statePushSupported: false, serviceAreaActive: false };
     }

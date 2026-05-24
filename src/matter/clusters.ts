@@ -23,6 +23,7 @@ export interface ServiceAreaPayload {
   supportedMaps: SupportedMap[];
   supportedAreas: SupportedArea[];
   selectedAreas: number[];
+  currentArea: number | null;
 }
 
 const NON_NUMERIC_AREA_OFFSET = 0x10000;
@@ -97,7 +98,12 @@ export class MatterClusterMapper {
       .map((roomId) => Number.parseInt(roomId, 10))
       .filter((areaId) => Number.isFinite(areaId) && validAreaIds.has(areaId));
 
-    return { supportedMaps, supportedAreas, selectedAreas };
+    // currentArea: the first selected room being actively cleaned, or null
+    const currentArea = (state.activity.runMode === 'cleaning' && selectedAreas.length > 0)
+      ? selectedAreas[0]!
+      : null;
+
+    return { supportedMaps, supportedAreas, selectedAreas, currentArea };
   }
 
   public static toMatterState(state: NormalizedState): Record<string, unknown> {
@@ -116,7 +122,12 @@ export class MatterClusterMapper {
         operationalError: MatterMappers.mapOperationalError(state),
       },
       PowerSource: {
+        status: 0,  // 0 = Unspecified (battery-only device)
+        order: 0,
+        description: 'Battery',
         batPercentRemaining: MatterMappers.mapBatteryLevel(state.power.batteryPercent),
+        batChargeLevel: MatterMappers.mapBatChargeLevel(state.power.batteryPercent),
+        batReplaceability: 1, // NOT_REPLACEABLE
         batChargeState: MatterMappers.mapChargeState(state.power),
       },
     };

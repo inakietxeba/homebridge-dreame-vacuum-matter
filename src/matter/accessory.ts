@@ -158,11 +158,25 @@ export class DreameVacuumAccessory {
         return;
       }
 
-      const matterApi = (this.api as unknown as { matter?: { updateAccessoryState?: (uuid: string, cluster: string, payload: unknown) => void | Promise<void> } }).matter;
+      const matterApi = (this.api as unknown as {
+        matter?: {
+          updateAccessoryState?: (uuid: string, cluster: string, payload: unknown) => void | Promise<void>;
+          clusterNames?: Record<string, string>;
+        };
+      }).matter;
       if (!matterApi?.updateAccessoryState) return;
 
+      const clusterNames: Record<string, string> = {
+        RvcRunMode: matterApi.clusterNames?.RvcRunMode ?? 'rvcRunMode',
+        RvcCleanMode: matterApi.clusterNames?.RvcCleanMode ?? 'rvcCleanMode',
+        RvcOperationalState: matterApi.clusterNames?.RvcOperationalState ?? 'rvcOperationalState',
+        ServiceArea: matterApi.clusterNames?.ServiceArea ?? 'serviceArea',
+        PowerSource: matterApi.clusterNames?.PowerSource ?? 'powerSource',
+      };
+
       const pushPromises: Promise<void>[] = [];
-      for (const [cluster, payload] of Object.entries(matterState)) {
+      for (const [clusterKey, payload] of Object.entries(matterState)) {
+        const cluster = clusterNames[clusterKey] ?? clusterKey;
         const promise = Promise.race([
           Promise.resolve(matterApi.updateAccessoryState(this.accessory.UUID, cluster, payload)),
           new Promise<void>((_, reject) =>
@@ -192,8 +206,11 @@ export class DreameVacuumAccessory {
         pushPromises.push(promise);
       }
 
-      await Promise.allSettled(pushPromises);
-      this.lastSyncedMatterState = matterState;
+      const results = await Promise.allSettled(pushPromises);
+      const allFailed = results.length > 0 && results.every((r) => r.status === 'rejected');
+      if (!allFailed) {
+        this.lastSyncedMatterState = matterState;
+      }
       this.syncRetryAttempts = 0;
       this.syncRetryDelayMs = 2000;
       this.consecutiveUnknownSessionErrors = 0;

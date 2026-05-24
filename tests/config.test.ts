@@ -3,6 +3,12 @@ import { parsePlatformConfig } from '../src/config';
 
 describe('Config', () => {
   it('should parse minimal config with defaults', () => {
+    // Ensure env vars don't interfere
+    const savedEmail = process.env['DREAME_EMAIL'];
+    const savedPassword = process.env['DREAME_PASSWORD'];
+    delete process.env['DREAME_EMAIL'];
+    delete process.env['DREAME_PASSWORD'];
+
     const config = parsePlatformConfig({
       platform: 'DreameVacuumMatter',
       name: 'Dreame',
@@ -10,15 +16,16 @@ describe('Config', () => {
       password: 'secret',
     } as any);
     expect(config.country).toBe('eu');
-    expect(config.defaultMode).toBe('SWEEP_AND_MOP');
-    expect(config.defaultSuction).toBe(1);
-    expect(config.defaultWaterLevel).toBe(2);
-    expect(config.disableMatterStatePush).toBe(false);
-    expect(config.rooms).toEqual([]);
+    expect(config.username).toBe('test@example.com');
+    expect(config.password).toBe('secret');
+
+    // Restore
+    if (savedEmail) process.env['DREAME_EMAIL'] = savedEmail;
+    if (savedPassword) process.env['DREAME_PASSWORD'] = savedPassword;
   });
 
   it('should accept env var overrides', () => {
-    process.env['DREAME_USERNAME'] = 'env@example.com';
+    process.env['DREAME_EMAIL'] = 'env@example.com';
     process.env['DREAME_PASSWORD'] = 'env-secret';
     const config = parsePlatformConfig({
       platform: 'DreameVacuumMatter',
@@ -26,7 +33,7 @@ describe('Config', () => {
     } as any);
     expect(config.username).toBe('env@example.com');
     expect(config.password).toBe('env-secret');
-    delete process.env['DREAME_USERNAME'];
+    delete process.env['DREAME_EMAIL'];
     delete process.env['DREAME_PASSWORD'];
   });
 });

@@ -14,7 +14,7 @@ describe('StateParser', () => {
 
   it('should parse battery level', () => {
     const parser = new StateParser(logger);
-    const state = createInitialState(identity, 'SWEEP_AND_MOP');
+    const state = createInitialState(identity);
     const result = parser.processProperties(
       [{ siid: 3, piid: 1, value: 85 }],
       state,
@@ -24,7 +24,7 @@ describe('StateParser', () => {
 
   it('should parse device state', () => {
     const parser = new StateParser(logger);
-    const state = createInitialState(identity, 'SWEEP_AND_MOP');
+    const state = createInitialState(identity);
     const result = parser.processProperties(
       [{ siid: 2, piid: 1, value: 1 }],
       state,
@@ -34,7 +34,7 @@ describe('StateParser', () => {
 
   it('should parse paused state', () => {
     const parser = new StateParser(logger);
-    const state = createInitialState(identity, 'SWEEP_AND_MOP');
+    const state = createInitialState(identity);
     const result = parser.processProperties(
       [{ siid: 2, piid: 1, value: 3 }],
       state,
@@ -44,7 +44,7 @@ describe('StateParser', () => {
 
   it('should parse charging state', () => {
     const parser = new StateParser(logger);
-    const state = createInitialState(identity, 'SWEEP_AND_MOP');
+    const state = createInitialState(identity);
     const result = parser.processProperties(
       [{ siid: 3, piid: 2, value: 1 }],
       state,
@@ -55,7 +55,7 @@ describe('StateParser', () => {
 
   it('should parse suction level', () => {
     const parser = new StateParser(logger);
-    const state = createInitialState(identity, 'SWEEP_AND_MOP');
+    const state = createInitialState(identity);
     const result = parser.processProperties(
       [{ siid: 4, piid: 4, value: 3 }],
       state,
@@ -65,7 +65,7 @@ describe('StateParser', () => {
 
   it('should parse cleaning mode', () => {
     const parser = new StateParser(logger);
-    const state = createInitialState(identity, 'SWEEP_AND_MOP');
+    const state = createInitialState(identity);
     const result = parser.processProperties(
       [{ siid: 4, piid: 23, value: 0 }],
       state,
@@ -75,7 +75,7 @@ describe('StateParser', () => {
 
   it('should parse error code', () => {
     const parser = new StateParser(logger);
-    const state = createInitialState(identity, 'SWEEP_AND_MOP');
+    const state = createInitialState(identity);
     const result = parser.processProperties(
       [{ siid: 2, piid: 2, value: 5 }],
       state,
@@ -87,7 +87,7 @@ describe('StateParser', () => {
 
   it('should clear error on code 0', () => {
     const parser = new StateParser(logger);
-    const state = createInitialState(identity, 'SWEEP_AND_MOP');
+    const state = createInitialState(identity);
     state.activity.activeError = 'Error 5';
     state.activity.activeErrorCode = 5;
     const result = parser.processProperties(
@@ -99,7 +99,7 @@ describe('StateParser', () => {
 
   it('should process multiple properties at once', () => {
     const parser = new StateParser(logger);
-    const state = createInitialState(identity, 'SWEEP_AND_MOP');
+    const state = createInitialState(identity);
     const result = parser.processProperties(
       [
         { siid: 2, piid: 1, value: 1 },

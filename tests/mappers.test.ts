@@ -7,7 +7,7 @@ describe('MatterMappers', () => {
   const identity = { deviceId: 'test-123', model: 'dreame.vacuum.test', firmware: '1.0' };
 
   it('should map idle state to DOCKED when docked', () => {
-    const state = createInitialState(identity, 'SWEEP_AND_MOP');
+    const state = createInitialState(identity);
     state.power.docked = true;
     state.power.charging = false;
     const result = MatterMappers.mapOperationalState(state);
@@ -15,7 +15,7 @@ describe('MatterMappers', () => {
   });
 
   it('should map idle+charging to CHARGING', () => {
-    const state = createInitialState(identity, 'SWEEP_AND_MOP');
+    const state = createInitialState(identity);
     state.power.docked = true;
     state.power.charging = true;
     const result = MatterMappers.mapOperationalState(state);
@@ -23,28 +23,28 @@ describe('MatterMappers', () => {
   });
 
   it('should map cleaning to RUNNING', () => {
-    const state = createInitialState(identity, 'SWEEP_AND_MOP');
+    const state = createInitialState(identity);
     state.activity.runMode = 'cleaning';
     const result = MatterMappers.mapOperationalState(state);
     expect(result).toBe(0x01); // RUNNING
   });
 
   it('should map returning to SEEKING_CHARGER', () => {
-    const state = createInitialState(identity, 'SWEEP_AND_MOP');
+    const state = createInitialState(identity);
     state.activity.runMode = 'returning';
     const result = MatterMappers.mapOperationalState(state);
     expect(result).toBe(0x40); // SEEKING_CHARGER
   });
 
   it('should map paused to PAUSED', () => {
-    const state = createInitialState(identity, 'SWEEP_AND_MOP');
+    const state = createInitialState(identity);
     state.activity.paused = true;
     const result = MatterMappers.mapOperationalState(state);
     expect(result).toBe(0x02); // PAUSED
   });
 
   it('should map error to ERROR', () => {
-    const state = createInitialState(identity, 'SWEEP_AND_MOP');
+    const state = createInitialState(identity);
     state.activity.activeError = 'Stuck';
     const result = MatterMappers.mapOperationalState(state);
     expect(result).toBe(0x03); // ERROR
@@ -67,7 +67,7 @@ describe('MatterClusterMapper', () => {
   const identity = { deviceId: 'test-123', model: 'dreame.vacuum.test', firmware: '1.0' };
 
   it('should produce full Matter state', () => {
-    const state = createInitialState(identity, 'SWEEP_AND_MOP');
+    const state = createInitialState(identity);
     state.power.batteryPercent = 80;
     const result = MatterClusterMapper.toMatterState(state);
     expect(result).toHaveProperty('RvcRunMode');
@@ -77,13 +77,13 @@ describe('MatterClusterMapper', () => {
   });
 
   it('should omit ServiceArea when no rooms', () => {
-    const state = createInitialState(identity, 'SWEEP_AND_MOP');
+    const state = createInitialState(identity);
     const result = MatterClusterMapper.toMatterState(state);
     expect(result).not.toHaveProperty('ServiceArea');
   });
 
   it('should include ServiceArea when rooms available', () => {
-    const state = createInitialState(identity, 'SWEEP_AND_MOP');
+    const state = createInitialState(identity);
     state.activity.availableRooms = [
       { id: '1', name: 'Living Room' },
       { id: '2', name: 'Kitchen' },

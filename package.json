@@ -4,7 +4,7 @@
   "description": "Matter-native Homebridge v2 plugin for Dreame vacuum robots via Dreame Cloud + MQTT",
   "displayName": "Dreame Vacuum Matter",
   "license": "Apache-2.0",
-  "author": "Inaki Etxeba",
+  "author": "inakietxeba",
   "main": "dist/index.js",
   "scripts": {
     "build": "rm -rf dist && tsc",

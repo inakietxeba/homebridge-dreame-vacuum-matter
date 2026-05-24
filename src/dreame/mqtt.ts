@@ -47,6 +47,7 @@ export class DreameMqttClient extends EventEmitter {
   }
 
   connect(): void {
+    if (this.client) return;
     this.connectInternal();
   }
 
@@ -54,7 +55,8 @@ export class DreameMqttClient extends EventEmitter {
     const info = this.connectionInfo;
     const hostParts = info.host.split(':');
     const brokerHost = hostParts[0]!;
-    const brokerPort = parseInt(hostParts[1] ?? '19328', 10);
+    const parsedPort = hostParts[1] ? parseInt(hostParts[1], 10) : NaN;
+    const brokerPort = Number.isFinite(parsedPort) ? parsedPort : 19328;
 
     const randomId = this.getRandomAgentId();
     const clientId = `p_${info.uid}_${randomId}_${brokerHost}`;
@@ -139,6 +141,7 @@ export class DreameMqttClient extends EventEmitter {
 
   disconnect(): void {
     if (this.client) {
+      this.client.removeAllListeners();
       this.client.end(true);
       this.client = null;
       this._connected = false;

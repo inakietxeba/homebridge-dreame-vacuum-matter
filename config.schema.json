@@ -16,7 +16,7 @@
         "title": "Dreame Account Email",
         "type": "string",
         "required": true,
-        "description": "Your Dreame / Dreamehome app email. Can also be set via DREAME_USERNAME env var."
+        "description": "Your Dreame / Dreamehome app email. Can also be set via DREAME_EMAIL env var."
       },
       "password": {
         "title": "Dreame Account Password",
@@ -37,49 +37,6 @@
           { "title": "Russia", "enum": ["ru"] }
         ],
         "description": "Dreame Cloud region — must match your Dreamehome app region."
-      },
-      "defaultMode": {
-        "title": "Default Cleaning Mode",
-        "type": "string",
-        "default": "SWEEP_AND_MOP",
-        "oneOf": [
-          { "title": "Sweep Only", "enum": ["SWEEP"] },
-          { "title": "Mop Only", "enum": ["MOP"] },
-          { "title": "Sweep and Mop", "enum": ["SWEEP_AND_MOP"] }
-        ]
-      },
-      "defaultSuction": {
-        "title": "Default Suction Level",
-        "type": "integer",
-        "default": 1,
-        "minimum": 0,
-        "maximum": 3,
-        "description": "0=Quiet, 1=Standard, 2=Strong, 3=Turbo"
-      },
-      "defaultWaterLevel": {
-        "title": "Default Water Level",
-        "type": "integer",
-        "default": 2,
-        "minimum": 1,
-        "maximum": 3,
-        "description": "1=Low, 2=Medium, 3=High"
-      },
-      "disableMatterStatePush": {
-        "title": "Disable Matter State Push",
-        "type": "boolean",
-        "default": false,
-        "description": "Troubleshooting: disable proactive Matter state pushes."
-      },
-      "rooms": {
-        "title": "Room Overrides",
-        "type": "array",
-        "items": {
-          "type": "object",
-          "properties": {
-            "id": { "title": "Room ID", "type": "string", "required": true },
-            "name": { "title": "Room Name", "type": "string", "required": true }
-          }
-        }
       }
     }
   }

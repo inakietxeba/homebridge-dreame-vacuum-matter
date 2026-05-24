@@ -1,4 +1,4 @@
-import { CleaningMode } from '../config';
+import type { CleaningMode } from '../config';
 
 /** Device identity from cloud discovery. */
 export interface Identity {
@@ -20,7 +20,10 @@ export interface MapRooms {
 }
 
 /** Dreame device run mode (derived from siid 2, piid 1). */
-export type RunMode = 'idle' | 'cleaning' | 'returning' | 'error';
+export type RunMode = 'idle' | 'cleaning' | 'returning' | 'maintenance' | 'mapping' | 'error';
+
+/** Maintenance sub-type when runMode === 'maintenance'. */
+export type MaintenanceType = 'emptying_dustbin' | 'cleaning_mop' | 'filling_water' | 'updating_maps' | undefined;
 
 /** Dreame suction level (siid 4, piid 4): 0=Quiet, 1=Standard, 2=Strong, 3=Turbo. */
 export type SuctionLevel = 0 | 1 | 2 | 3;
@@ -44,6 +47,7 @@ export interface ActivityState {
   waterLevel: WaterLevel;
   activeError: string | null;
   activeErrorCode: number | undefined;
+  maintenanceType: MaintenanceType;
   availableRooms: RoomInfo[];
   selectedRooms: string[];
   knownMaps: MapRooms[];
@@ -57,8 +61,8 @@ export interface NormalizedState {
   activity: ActivityState;
 }
 
-/** Creates an initial blank state. */
-export function createInitialState(identity: Identity, defaultMode: CleaningMode): NormalizedState {
+/** Creates an initial blank state. Mode/suction/water will be read from the robot. */
+export function createInitialState(identity: Identity): NormalizedState {
   return {
     identity,
     power: {
@@ -69,11 +73,12 @@ export function createInitialState(identity: Identity, defaultMode: CleaningMode
     activity: {
       runMode: 'idle',
       paused: false,
-      cleanMode: defaultMode,
+      cleanMode: 'SWEEP_AND_MOP',
       suctionLevel: 1,
       waterLevel: 2,
       activeError: null,
       activeErrorCode: undefined,
+      maintenanceType: undefined,
       availableRooms: [],
       selectedRooms: [],
       knownMaps: [],
@@ -89,22 +94,29 @@ export function createInitialState(identity: Identity, defaultMode: CleaningMode
 export const DREAME_STATE: Record<number, RunMode> = {
   1: 'cleaning',   // Sweeping
   2: 'idle',       // Idle
-  3: 'idle',       // Sleeping (idle)
+  3: 'cleaning',   // Paused (mid-clean pause)
   4: 'error',      // Error
   5: 'returning',  // Returning
   6: 'idle',       // Charging (idle + docked)
   7: 'cleaning',   // Mopping
-  8: 'cleaning',   // Drying
-  9: 'idle',       // Washing
-  10: 'returning', // Going to wash
-  11: 'cleaning',  // Building map
-  12: 'cleaning',  // Sweeping and mopping
-  13: 'returning', // Charging completed
+  8: 'maintenance', // Drying (mop maintenance)
+  9: 'maintenance', // Washing (mop maintenance)
+  10: 'maintenance', // Going to wash (mop maintenance)
+  11: 'mapping',      // Building map
+  12: 'cleaning',   // Sweeping and mopping
+  13: 'idle',        // Charging completed (docked)
   14: 'cleaning',  // Upgrading
   15: 'cleaning',  // Clean Summon
   16: 'returning', // Station reset
   17: 'cleaning',  // Returning install mop
   18: 'cleaning',  // Returning remove mop
+};
+
+/** Maps Dreame state values to maintenance sub-types (when runMode === 'maintenance'). */
+export const DREAME_MAINTENANCE_TYPE: Record<number, MaintenanceType> = {
+  8: 'cleaning_mop',   // Drying
+  9: 'cleaning_mop',   // Washing
+  10: 'cleaning_mop',  // Going to wash
 };
 
 /** Dreame cleaning mode values (siid 4, piid 23). */

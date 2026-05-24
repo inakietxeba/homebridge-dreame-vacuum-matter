@@ -97,7 +97,8 @@ export class DreameCloud {
 
     this.accessToken = data['access_token'] as string;
     this.refreshToken = (data['refresh_token'] as string) ?? null;
-    this.tokenExpireTime = Date.now() + ((data['expires_in'] as number) * 1000) - 120_000;
+    const expiresIn = (data['expires_in'] as number) || 7200;
+    this.tokenExpireTime = Date.now() + (expiresIn * 1000) - 120_000;
     this.tenantId = (data['tenant_id'] as string) ?? this.tenantId;
     this._uid = (data['uid'] as string) ?? this._uid;
     this._connected = true;
@@ -128,7 +129,8 @@ export class DreameCloud {
 
     this.accessToken = data['access_token'] as string;
     this.refreshToken = (data['refresh_token'] as string) ?? null;
-    this.tokenExpireTime = Date.now() + ((data['expires_in'] as number) * 1000) - 120_000;
+    const expiresIn = (data['expires_in'] as number) || 7200;
+    this.tokenExpireTime = Date.now() + (expiresIn * 1000) - 120_000;
     this.tenantId = (data['tenant_id'] as string) ?? this.tenantId;
     this._connected = true;
   }
@@ -182,10 +184,13 @@ export class DreameCloud {
 
         const res = await fetch(url, fetchOptions);
 
-        if (res.status === 401 && this.refreshToken) {
-          this.log.warn('Token expired, refreshing...');
-          await this.refreshLogin();
-          continue;
+        if (res.status === 401) {
+          if (this.refreshToken) {
+            this.log.warn('Token expired, refreshing...');
+            await this.refreshLogin();
+            continue;
+          }
+          throw new Error('HTTP 401: Token expired and no refresh token available');
         }
 
         if (res.status !== 200) {
@@ -201,6 +206,10 @@ export class DreameCloud {
       } catch (err) {
         lastError = err as Error;
         this.log.warn(`Request failed (attempt ${i + 1}/${retryCount + 1}): ${lastError.message}`);
+        if (i < retryCount) {
+          const delayMs = Math.min(1000 * Math.pow(2, i), 10_000);
+          await new Promise((resolve) => setTimeout(resolve, delayMs));
+        }
       }
     }
 
