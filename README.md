@@ -1,4 +1,4 @@
-# homebridge-dreame-vacuum-mqtt
+# homebridge-dreame-vacuum-matter
 
 Matter-native Homebridge v2 plugin for Dreame vacuum robots.
 
@@ -22,10 +22,10 @@ Connects to **Dreame Cloud** for authentication and device commands, and subscri
 ## Installation
 
 ```bash
-npm install homebridge-dreame-vacuum-mqtt
+npm install homebridge-dreame-vacuum-matter
 ```
 
-Or search for `homebridge-dreame-vacuum-mqtt` in the Homebridge UI.
+Or search for `homebridge-dreame-vacuum-matter` in the Homebridge UI.
 
 ## Configuration
 
