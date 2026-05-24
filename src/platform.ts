@@ -14,7 +14,7 @@ import { MatterClusterMapper } from './matter/clusters';
 import { DeviceSession } from './device-session';
 import { createInitialState, Identity, RoomInfo, MapRooms, NormalizedState } from './dreame/models';
 
-const PLUGIN_NAME = 'homebridge-dreame-vacuum-mqtt';
+const PLUGIN_NAME = 'homebridge-dreame-vacuum-matter';
 const PLATFORM_NAME = 'DreameVacuumMatter';
 
 type MatterPlatformApi = {
