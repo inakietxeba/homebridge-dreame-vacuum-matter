@@ -76,6 +76,8 @@ export class DreameMqttClient extends EventEmitter {
       keepalive: 60,
       connectTimeout: 10_000,
       reconnectPeriod: Math.min(5_000, this.reconnectMaxDelayMs),
+      // Dreame's MQTT broker uses a certificate not in standard CA bundles.
+      // Disabling verification is required for connectivity.
       rejectUnauthorized: false,
     });
 

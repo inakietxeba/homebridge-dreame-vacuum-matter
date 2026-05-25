@@ -243,8 +243,18 @@ export class DreameCloud {
     if (!data || response['code'] !== 0) return null;
 
     this.host = (data['bindDomain'] as string) ?? null;
+
+    // Extract firmware version from various possible fields
+    this.lastDeviceFirmware = (data['mcuVersion'] as string)
+      ?? (data['featureVersion'] as string)
+      ?? (data['firmwareVersion'] as string)
+      ?? null;
+
     return data;
   }
+
+  /** Firmware version from the last getDeviceInfo call. */
+  public lastDeviceFirmware: string | null = null;
 
   async sendCommand(deviceId: string, method: string, params: unknown): Promise<unknown> {
     const hostPrefix = this.host ? `-${this.host.split('.')[0]!}` : '';

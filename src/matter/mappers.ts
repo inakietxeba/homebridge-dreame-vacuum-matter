@@ -77,26 +77,97 @@ export enum MatterBatReplaceability {
 /**
  * Maps Dreame error codes to Matter RVC error states.
  * Dreame error codes come from siid 2, piid 2.
+ * Source: Home Assistant Dreame Vacuum integration (120+ codes).
  */
 const ERROR_CODE_TO_MATTER: Record<number, MatterOperationalErrorState> = {
-  // Stuck / physically trapped
-  1: MatterOperationalErrorState.STUCK,     // Wheel stuck
-  2: MatterOperationalErrorState.STUCK,     // Brush stuck
-  3: MatterOperationalErrorState.STUCK,     // Side brush stuck
-  4: MatterOperationalErrorState.STUCK,     // Cliff sensor error
-  5: MatterOperationalErrorState.STUCK,     // Bumper stuck
-  6: MatterOperationalErrorState.STUCK,     // Drop error
-  7: MatterOperationalErrorState.STUCK,     // Wall sensor error
-  // Dust bin / bag
-  8: MatterOperationalErrorState.DUST_BIN_MISSING,   // Dustbin not installed
-  // Water / mop
-  9: MatterOperationalErrorState.WATER_TANK_MISSING,  // Water tank removed
-  10: MatterOperationalErrorState.MOP_CLEANING_PAD_MISSING, // Mop not installed
-  // Charging dock
-  11: MatterOperationalErrorState.FAILED_TO_FIND_CHARGING_DOCK,
-  12: MatterOperationalErrorState.UNABLE_TO_START_OR_RESUME,
-  // Low battery
-  14: MatterOperationalErrorState.UNABLE_TO_START_OR_RESUME,
+  // ── STUCK / physically trapped ────────────────────────────────────────
+  1: MatterOperationalErrorState.STUCK,      // Wheels suspended (DROP)
+  2: MatterOperationalErrorState.STUCK,      // Cliff sensor error
+  3: MatterOperationalErrorState.STUCK,      // Collision sensor stuck (BUMPER)
+  4: MatterOperationalErrorState.STUCK,      // Robot tilted (GESTURE)
+  5: MatterOperationalErrorState.STUCK,      // Bumper repeat
+  6: MatterOperationalErrorState.STUCK,      // Drop repeat
+  7: MatterOperationalErrorState.STUCK,      // Optical flow sensor error
+  15: MatterOperationalErrorState.STUCK,     // Left wheel motor blocked
+  16: MatterOperationalErrorState.STUCK,     // Right wheel motor blocked
+  17: MatterOperationalErrorState.STUCK,     // Cannot turn (TURN_SUFFOCATE)
+  18: MatterOperationalErrorState.STUCK,     // Cannot go forward (FORWARD_SUFFOCATE)
+  31: MatterOperationalErrorState.STUCK,     // Left wheel foreign objects
+  32: MatterOperationalErrorState.STUCK,     // Right wheel foreign objects
+  41: MatterOperationalErrorState.STUCK,     // Strong magnetic field
+  47: MatterOperationalErrorState.STUCK,     // Route blocked, returning
+  61: MatterOperationalErrorState.STUCK,     // Route blocked
+  62: MatterOperationalErrorState.STUCK,     // Route blocked (variant)
+  63: MatterOperationalErrorState.STUCK,     // Route blocked (variant)
+  64: MatterOperationalErrorState.STUCK,     // Route blocked (variant)
+  65: MatterOperationalErrorState.STUCK,     // Restricted area
+  66: MatterOperationalErrorState.STUCK,     // Restricted area (variant)
+  67: MatterOperationalErrorState.STUCK,     // Restricted area (variant)
+  80: MatterOperationalErrorState.STUCK,     // LDS cannot be raised
+  81: MatterOperationalErrorState.STUCK,     // Move to open area
+  82: MatterOperationalErrorState.STUCK,     // Slippery floor
+  88: MatterOperationalErrorState.STUCK,     // Retractable leg stuck
+  90: MatterOperationalErrorState.STUCK,     // LDS positioning error
+  91: MatterOperationalErrorState.STUCK,     // Stuck among tables
+  92: MatterOperationalErrorState.STUCK,     // Stuck in narrow passage
+  93: MatterOperationalErrorState.STUCK,     // Stuck at threshold
+  94: MatterOperationalErrorState.STUCK,     // Stuck in low-clearance area
+  95: MatterOperationalErrorState.STUCK,     // Detected fall ramp
+  96: MatterOperationalErrorState.STUCK,     // Obstacles on path
+  97: MatterOperationalErrorState.STUCK,     // People/pets on path
+  98: MatterOperationalErrorState.STUCK,     // Stuck due to slipping
+  99: MatterOperationalErrorState.STUCK,     // Slips on carpet
+  200: MatterOperationalErrorState.STUCK,    // Slips in curtain area
+  226: MatterOperationalErrorState.STUCK,    // Blocked by obstacle
+
+  // ── DUST_BIN_MISSING ──────────────────────────────────────────────────
+  8: MatterOperationalErrorState.DUST_BIN_MISSING,    // Dustbin not installed
+  101: MatterOperationalErrorState.DUST_BIN_MISSING,  // Dust bag full or duct blocked
+  102: MatterOperationalErrorState.DUST_BIN_MISSING,  // Cover not closed or bag missing
+  104: MatterOperationalErrorState.DUST_BIN_MISSING,  // Dust bag full
+  121: MatterOperationalErrorState.DUST_BIN_MISSING,  // Dust bag full or vents blocked
+
+  // ── WATER_TANK_MISSING ────────────────────────────────────────────────
+  9: MatterOperationalErrorState.WATER_TANK_MISSING,    // Water tank not installed
+  76: MatterOperationalErrorState.WATER_TANK_MISSING,   // Dirty tank not installed
+  105: MatterOperationalErrorState.WATER_TANK_MISSING,  // Clean water tank missing
+  106: MatterOperationalErrorState.WATER_TANK_MISSING,  // Dirty water tank full/missing
+  109: MatterOperationalErrorState.WATER_TANK_MISSING,  // Dirty tank blocked
+  110: MatterOperationalErrorState.WATER_TANK_MISSING,  // Dirty tank pump error
+
+  // ── WATER_TANK_EMPTY ──────────────────────────────────────────────────
+  10: MatterOperationalErrorState.WATER_TANK_EMPTY,    // Water tank empty
+  107: MatterOperationalErrorState.WATER_TANK_EMPTY,   // Low water in clean tank
+  116: MatterOperationalErrorState.WATER_TANK_EMPTY,   // Check/fill clean water tank
+  213: MatterOperationalErrorState.WATER_TANK_EMPTY,   // Onboard clean water box empty
+
+  // ── MOP_CLEANING_PAD_MISSING ──────────────────────────────────────────
+  69: MatterOperationalErrorState.MOP_CLEANING_PAD_MISSING,   // Mop pad came off
+  70: MatterOperationalErrorState.MOP_CLEANING_PAD_MISSING,   // Mop pad came off (variant)
+  71: MatterOperationalErrorState.MOP_CLEANING_PAD_MISSING,   // Mop pad stopped rotating
+  72: MatterOperationalErrorState.MOP_CLEANING_PAD_MISSING,   // Mop pad stopped rotating
+  74: MatterOperationalErrorState.MOP_CLEANING_PAD_MISSING,   // Mop install failed
+  85: MatterOperationalErrorState.MOP_CLEANING_PAD_MISSING,   // Check mop installation
+  111: MatterOperationalErrorState.MOP_CLEANING_PAD_MISSING,  // Washboard not installed
+  120: MatterOperationalErrorState.MOP_CLEANING_PAD_MISSING,  // Mop pad not in station
+  126: MatterOperationalErrorState.MOP_CLEANING_PAD_MISSING,  // Mop not detected
+  127: MatterOperationalErrorState.MOP_CLEANING_PAD_MISSING,  // Mop holder error
+  215: MatterOperationalErrorState.MOP_CLEANING_PAD_MISSING,  // Mop not installed
+
+  // ── FAILED_TO_FIND_CHARGING_DOCK ──────────────────────────────────────
+  19: MatterOperationalErrorState.FAILED_TO_FIND_CHARGING_DOCK,    // Cannot find base
+  1000: MatterOperationalErrorState.FAILED_TO_FIND_CHARGING_DOCK,  // Return to charge failed
+
+  // ── UNABLE_TO_START_OR_RESUME ─────────────────────────────────────────
+  12: MatterOperationalErrorState.UNABLE_TO_START_OR_RESUME,   // Main brush wrapped
+  14: MatterOperationalErrorState.UNABLE_TO_START_OR_RESUME,   // Filter not dry/blocked
+  20: MatterOperationalErrorState.UNABLE_TO_START_OR_RESUME,   // Low battery
+  21: MatterOperationalErrorState.UNABLE_TO_START_OR_RESUME,   // Charging error
+  22: MatterOperationalErrorState.UNABLE_TO_START_OR_RESUME,   // Battery level error
+  29: MatterOperationalErrorState.UNABLE_TO_START_OR_RESUME,   // Battery error
+  75: MatterOperationalErrorState.UNABLE_TO_START_OR_RESUME,   // Low battery shutdown
+  117: MatterOperationalErrorState.UNABLE_TO_START_OR_RESUME,  // Base station not powered
+  128: MatterOperationalErrorState.UNABLE_TO_START_OR_RESUME,  // Dock error
 };
 
 export class MatterMappers {

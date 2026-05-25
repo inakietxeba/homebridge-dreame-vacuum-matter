@@ -31,6 +31,33 @@ export type SuctionLevel = 0 | 1 | 2 | 3;
 /** Dreame water level (siid 4, piid 5): 1=Low, 2=Medium, 3=High. */
 export type WaterLevel = 1 | 2 | 3;
 
+// ── MIoT spec IDs ──────────────────────────────────────────────────────────
+
+/** MIoT service/property/action IDs for Dreame robot vacuums. */
+export const MIOT = {
+  /** siid 2 — Device state service. */
+  STATE: { siid: 2, STATE: 1, ERROR: 2 },
+  /** siid 3 — Battery service. */
+  BATTERY: { siid: 3, LEVEL: 1, CHARGE_STATUS: 2 },
+  /** siid 4 — Vacuum service. */
+  VACUUM: { siid: 4, SUCTION: 4, WATER: 5, CLEANING_PROPERTIES: 10, CLEAN_MODE: 23 },
+  /** siid 6 — Charge service. */
+  CHARGE: { siid: 6 },
+  /** Action IDs. */
+  ACTION: { START: 1, STOP: 2, PAUSE: 3, DOCK: 1 },
+} as const;
+
+/** Properties to poll via HTTP for state updates. */
+export const POLL_PROPERTIES = [
+  { siid: MIOT.STATE.siid, piid: MIOT.STATE.STATE },
+  { siid: MIOT.STATE.siid, piid: MIOT.STATE.ERROR },
+  { siid: MIOT.BATTERY.siid, piid: MIOT.BATTERY.LEVEL },
+  { siid: MIOT.BATTERY.siid, piid: MIOT.BATTERY.CHARGE_STATUS },
+  { siid: MIOT.VACUUM.siid, piid: MIOT.VACUUM.SUCTION },
+  { siid: MIOT.VACUUM.siid, piid: MIOT.VACUUM.WATER },
+  { siid: MIOT.VACUUM.siid, piid: MIOT.VACUUM.CLEAN_MODE },
+] as const;
+
 /** Power state snapshot. */
 export interface PowerState {
   batteryPercent: number;
@@ -105,7 +132,7 @@ export const DREAME_STATE: Record<number, RunMode> = {
   11: 'mapping',      // Building map
   12: 'cleaning',   // Sweeping and mopping
   13: 'idle',        // Charging completed (docked)
-  14: 'cleaning',  // Upgrading
+  14: 'idle',       // Upgrading firmware (not cleaning)
   15: 'cleaning',  // Clean Summon
   16: 'returning', // Station reset
   17: 'cleaning',  // Returning install mop

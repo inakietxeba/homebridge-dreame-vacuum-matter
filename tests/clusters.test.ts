@@ -186,4 +186,45 @@ describe('MatterClusterMapper', () => {
       expect(ps['batChargeState']).toBe(0x01); // IS_NOT_CHARGING
     });
   });
+
+  describe('buildAreaIdToRoomIdMap', () => {
+    it('should map numeric room IDs directly', () => {
+      const state = createInitialState(identity);
+      state.activity.availableRooms = [
+        { id: '1', name: 'Living Room' },
+        { id: '5', name: 'Kitchen' },
+      ];
+      const map = MatterClusterMapper.buildAreaIdToRoomIdMap(state);
+      expect(map.get(1)).toBe('1');
+      expect(map.get(5)).toBe('5');
+    });
+
+    it('should map non-numeric room IDs with offset', () => {
+      const state = createInitialState(identity);
+      state.activity.availableRooms = [
+        { id: 'room_a', name: 'Room A' },
+        { id: 'room_b', name: 'Room B' },
+      ];
+      const map = MatterClusterMapper.buildAreaIdToRoomIdMap(state);
+      expect(map.get(0x10000)).toBe('room_a');
+      expect(map.get(0x10001)).toBe('room_b');
+    });
+
+    it('should return empty map when no rooms', () => {
+      const state = createInitialState(identity);
+      const map = MatterClusterMapper.buildAreaIdToRoomIdMap(state);
+      expect(map.size).toBe(0);
+    });
+
+    it('should handle multi-floor maps', () => {
+      const state = createInitialState(identity);
+      state.activity.knownMaps = [
+        { mapId: 100, rooms: [{ id: '1', name: 'Room 1' }] },
+        { mapId: 200, rooms: [{ id: '2', name: 'Room 2' }] },
+      ];
+      const map = MatterClusterMapper.buildAreaIdToRoomIdMap(state);
+      expect(map.get(1)).toBe('1');
+      expect(map.get(2)).toBe('2');
+    });
+  });
 });

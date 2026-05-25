@@ -4,6 +4,7 @@ import { DreameCloud } from './dreame/cloud';
 import { MatterCommandHandlers } from './matter/handlers';
 import { DreameVacuumAccessory } from './matter/accessory';
 import { StateParser } from './dreame/parser';
+import { POLL_PROPERTIES } from './dreame/models';
 
 export class DeviceSession {
   private mqttClient: DreameMqttClient | null = null;
@@ -12,23 +13,13 @@ export class DeviceSession {
   private mqttConnected = false;
   private isPolling = false;
   private disposed = false;
+  private consecutivePollFailures = 0;
 
-  /** Polling intervals matching homebridge-dreame-vacuum (HomeKit). */
-  private static readonly POLL_ACTIVE_MS = 15_000;      // 15s when cleaning
-  private static readonly POLL_MQTT_ACTIVE_MS = 60_000;  // 60s backup when MQTT + cleaning
-  private static readonly POLL_MQTT_IDLE_MS = 180_000;   // 180s backup when MQTT + idle
-  private static readonly POLL_NO_MQTT_MS = 60_000;      // 60s when no MQTT
-
-  /** Properties to poll via HTTP. */
-  private static readonly POLL_PROPERTIES = [
-    { siid: 2, piid: 1 }, // Device state
-    { siid: 2, piid: 2 }, // Error
-    { siid: 3, piid: 1 }, // Battery
-    { siid: 3, piid: 2 }, // Charge status
-    { siid: 4, piid: 4 }, // Suction
-    { siid: 4, piid: 5 }, // Water level
-    { siid: 4, piid: 23 }, // Cleaning mode
-  ];
+  /** Polling intervals. */
+  private static readonly POLL_ACTIVE_MS = 15_000;       // 15s when cleaning without MQTT
+  private static readonly POLL_MQTT_ACTIVE_MS = 60_000;   // 60s backup when MQTT + cleaning
+  private static readonly POLL_MQTT_IDLE_MS = 300_000;    // 5min heartbeat when MQTT + idle
+  private static readonly POLL_NO_MQTT_MS = 60_000;       // 60s when no MQTT + idle
 
   constructor(
     private readonly deviceId: string,
@@ -49,14 +40,7 @@ export class DeviceSession {
 
     mqttClient.on('message', (properties) => {
       try {
-        const currentState = this.accessoryHandler.getCurrentState();
-        const newState = this.parser.processProperties(properties, currentState);
-        const decodedCleanMode = newState.activity.cleanMode;
-        newState.activity.cleanMode = this.handlers.resolveCleanModeForState(decodedCleanMode);
-        this.accessoryHandler.onStateUpdate(newState);
-        if (decodedCleanMode !== currentState.activity.cleanMode) {
-          this.handlers.syncCleanModeFromDevice(decodedCleanMode);
-        }
+        this.processStateUpdate(properties);
       } catch (err: unknown) {
         this.log.error(`Failed to process MQTT message for ${this.deviceName}: ${err instanceof Error ? err.message : String(err)}`);
       }
@@ -103,7 +87,7 @@ export class DeviceSession {
     this.isPolling = true;
 
     try {
-      const params = DeviceSession.POLL_PROPERTIES.map((p) => ({
+      const params = POLL_PROPERTIES.map((p) => ({
         did: this.deviceId,
         siid: p.siid,
         piid: p.piid,
@@ -111,21 +95,33 @@ export class DeviceSession {
       const props = await this.cloud.getProperties(this.deviceId, params);
 
       if (props && props.length > 0) {
-        const currentState = this.accessoryHandler.getCurrentState();
         const propsWithValues = props
           .filter((p) => p.value !== undefined)
           .map((p) => ({ siid: p.siid, piid: p.piid, value: p.value }));
-        const newState = this.parser.processProperties(propsWithValues, currentState);
-        const decodedCleanMode = newState.activity.cleanMode;
-        newState.activity.cleanMode = this.handlers.resolveCleanModeForState(decodedCleanMode);
-        this.accessoryHandler.onStateUpdate(newState);
+        this.processStateUpdate(propsWithValues);
       }
+      this.consecutivePollFailures = 0;
     } catch (err: unknown) {
-      this.log.debug(`HTTP poll failed for ${this.deviceName}: ${err instanceof Error ? err.message : String(err)}`);
+      this.consecutivePollFailures++;
+      const level = this.consecutivePollFailures >= 3 ? 'warn' : 'debug';
+      this.log[level](`HTTP poll failed for ${this.deviceName} (attempt ${this.consecutivePollFailures}): ${err instanceof Error ? err.message : String(err)}`);
     } finally {
       this.isPolling = false;
       this.schedulePoll();
     }
+  }
+
+  private processStateUpdate(properties: Array<{ siid: number; piid: number; value: unknown }>): void {
+    const currentState = this.accessoryHandler.getCurrentState();
+    const newState = this.parser.processProperties(properties, currentState);
+    const decodedCleanMode = newState.activity.cleanMode;
+    newState.activity.cleanMode = this.handlers.resolveCleanModeForState(decodedCleanMode);
+    this.accessoryHandler.onStateUpdate(newState);
+    if (decodedCleanMode !== currentState.activity.cleanMode) {
+      this.handlers.syncCleanModeFromDevice(decodedCleanMode);
+    }
+    // Keep suction/water levels in sync so room clean uses correct values
+    this.handlers.syncLevelsFromDevice(newState.activity.suctionLevel, newState.activity.waterLevel);
   }
 
   dispose(): void {

@@ -16,7 +16,7 @@ Connects to **Dreame Cloud** for authentication and device commands, and subscri
 ## Requirements
 
 - **Homebridge >= 2.0.0-beta.0** (Matter support required)
-- **Node.js >= 22.12.0**
+- **Node.js >= 22.12.0** (or >= 24.0.0)
 - A Dreame vacuum connected to the Dreamehome app
 
 ## Installation
@@ -47,14 +47,9 @@ Or search for `homebridge-dreame-vacuum-matter` in the Homebridge UI.
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `username` | — | Dreame/Dreamehome app email. Overridable via `DREAME_USERNAME` env var |
+| `username` | — | Dreame/Dreamehome app email. Overridable via `DREAME_EMAIL` env var |
 | `password` | — | Dreame/Dreamehome app password. Overridable via `DREAME_PASSWORD` env var |
 | `country` | `eu` | Cloud region: `cn`, `eu`, `us`, `sg`, `kr`, `ru` |
-| `defaultMode` | `SWEEP_AND_MOP` | Default cleaning mode: `SWEEP`, `MOP`, `SWEEP_AND_MOP` |
-| `defaultSuction` | `1` | Suction level: 0=Quiet, 1=Standard, 2=Strong, 3=Turbo |
-| `defaultWaterLevel` | `2` | Water level: 1=Low, 2=Medium, 3=High |
-| `disableMatterStatePush` | `false` | Disable proactive Matter state pushes (troubleshooting) |
-| `rooms` | `[]` | Room overrides: `[{ "id": "1", "name": "Living Room" }]` |
 
 ## Architecture
 
@@ -65,14 +60,14 @@ Or search for `homebridge-dreame-vacuum-matter` in the Homebridge UI.
                  │  Matter (RoboticVacuumCleaner)
 ┌────────────────┴────────────────────────┐
 │  Homebridge v2 + homebridge-dreame-     │
-│  vacuum-mqtt plugin                     │
+│  vacuum-matter plugin                   │
 └────────┬────────────────┬───────────────┘
          │ HTTP (commands)│ MQTTS (state)
-    ┌────┴──────┐   ┌────┴──────────┐
-    │DreameCloud│   │  DreameMQTT   │
-    │(REST API) │   │  (Push State) │
-    └────┬──────┘   └────┬──────────┘
-         └───────┬───────┘
+    ┌────┴──────┐    ┌────┴──────────┐
+    │DreameCloud│    │  DreameMQTT   │
+    │(REST API) │    │  (Push State) │
+    └────┬──────┘    └────┬──────────┘
+         └───────┬────────┘
      ┌───────────┴──────────────┐
      │   Dreame Cloud Servers   │
      │  iot.dreame.tech:13267   │

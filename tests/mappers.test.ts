@@ -91,4 +91,36 @@ describe('MatterClusterMapper', () => {
     const result = MatterClusterMapper.toMatterState(state);
     expect(result).toHaveProperty('ServiceArea');
   });
+
+  describe('expanded error code mapping', () => {
+    const errorCases: Array<[string, number, number]> = [
+      ['wheel motor stuck', 15, 0x41],       // STUCK
+      ['stuck on carpet', 99, 0x41],          // STUCK
+      ['blocked by obstacle', 226, 0x41],     // STUCK
+      ['dust bag full', 101, 0x42],           // DUST_BIN_MISSING
+      ['dirty tank not installed', 76, 0x44], // WATER_TANK_MISSING
+      ['clean water tank empty', 107, 0x43],  // WATER_TANK_EMPTY
+      ['mop pad came off', 69, 0x45],         // MOP_CLEANING_PAD_MISSING
+      ['cannot find base', 19, 0x48],         // FAILED_TO_FIND_CHARGING_DOCK
+      ['return to charge failed', 1000, 0x48],// FAILED_TO_FIND_CHARGING_DOCK
+      ['low battery', 20, 0x47],              // UNABLE_TO_START_OR_RESUME
+      ['dock error', 128, 0x47],              // UNABLE_TO_START_OR_RESUME
+    ];
+
+    it.each(errorCases)('should map %s (code %i) to error state 0x%s', (_desc, code, expected) => {
+      const state = createInitialState(identity);
+      state.activity.activeError = _desc;
+      state.activity.activeErrorCode = code;
+      const result = MatterMappers.mapOperationalError(state);
+      expect(result.errorStateId).toBe(expected);
+    });
+
+    it('should default unmapped codes to STUCK', () => {
+      const state = createInitialState(identity);
+      state.activity.activeError = 'Unknown error';
+      state.activity.activeErrorCode = 9999;
+      const result = MatterMappers.mapOperationalError(state);
+      expect(result.errorStateId).toBe(0x41); // STUCK
+    });
+  });
 });

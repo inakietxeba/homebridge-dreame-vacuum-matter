@@ -26,6 +26,22 @@ export interface ServiceAreaPayload {
   currentArea: number | null;
 }
 
+export interface MatterState {
+  RvcRunMode: { supportedModes: unknown[]; currentMode: number };
+  RvcCleanMode: { supportedModes: unknown[]; currentMode: number };
+  RvcOperationalState: { operationalStateList: unknown[]; operationalState: number; operationalError: unknown };
+  PowerSource: {
+    status: number;
+    order: number;
+    description: string;
+    batPercentRemaining: number;
+    batChargeLevel: number;
+    batReplaceability: number;
+    batChargeState: number;
+  };
+  ServiceArea?: ServiceAreaPayload;
+}
+
 const NON_NUMERIC_AREA_OFFSET = 0x10000;
 
 export class MatterClusterMapper {
@@ -106,8 +122,8 @@ export class MatterClusterMapper {
     return { supportedMaps, supportedAreas, selectedAreas, currentArea };
   }
 
-  public static toMatterState(state: NormalizedState): Record<string, unknown> {
-    const result: Record<string, unknown> = {
+  public static toMatterState(state: NormalizedState): MatterState {
+    const result: MatterState = {
       RvcRunMode: {
         supportedModes: MatterMappers.getSupportedRunModes(),
         currentMode: MatterMappers.mapRvcRunMode(state),
@@ -135,6 +151,37 @@ export class MatterClusterMapper {
     const serviceArea = MatterClusterMapper.buildServiceArea(state);
     if (serviceArea) {
       result['ServiceArea'] = serviceArea;
+    }
+
+    return result;
+  }
+
+  /**
+   * Builds a reverse mapping from Matter areaId → Dreame room ID string.
+   * Used by selectAreas handler to convert Matter area selections to device commands.
+   */
+  public static buildAreaIdToRoomIdMap(state: NormalizedState): Map<number, string> {
+    const result = new Map<number, string>();
+    const serviceArea = MatterClusterMapper.buildServiceArea(state);
+    if (!serviceArea) return result;
+
+    // Collect all room sources
+    const knownMaps = state.activity.knownMaps ?? [];
+    const mapsWithRooms = knownMaps
+      .map((m) => ({ ...m, rooms: MatterClusterMapper.normalizeRooms(m.rooms) }))
+      .filter((m) => m.rooms.length > 0);
+
+    const allRooms: RoomInfo[] = mapsWithRooms.length > 0
+      ? mapsWithRooms.flatMap((m) => m.rooms)
+      : MatterClusterMapper.normalizeRooms(state.activity.availableRooms);
+
+    // Map each areaId back to its room ID
+    let globalIndex = 0;
+    for (const room of allRooms) {
+      const parsed = Number.parseInt(room.id, 10);
+      const areaId = Number.isFinite(parsed) && parsed > 0 ? parsed : NON_NUMERIC_AREA_OFFSET + globalIndex;
+      result.set(areaId, room.id);
+      globalIndex += 1;
     }
 
     return result;
