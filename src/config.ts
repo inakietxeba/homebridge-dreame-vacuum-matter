@@ -7,6 +7,7 @@ export const platformConfigSchema = z.object({
   username: z.string().max(256).optional(),
   password: z.string().max(256).optional(),
   country: z.enum(['cn', 'eu', 'us', 'sg', 'kr', 'ru']).optional().default('eu'),
+  automationContactSensors: z.boolean().optional().default(false),
 });
 
 export type DreamePlatformConfig = PlatformConfig & z.infer<typeof platformConfigSchema>;

@@ -10,7 +10,7 @@ Connects to **Dreame Cloud** for authentication and device commands, and subscri
 - **Real-time state**: MQTT push from Dreame Cloud (battery, cleaning state, errors)
 - **Cleaning modes**: Sweep, Mop, Sweep & Mop — selectable from Apple Home
 - **Operational states**: Running, Paused, Docked, Charging, Seeking Charger, Error
-- **Automation switch**: HomeKit switch accessory that follows cleaning vs idle state for Apple Home automations
+- **Optional automation sensors**: Disabled by default; exposes HomeKit contact sensors for Idle, Busy, Cleaning, and Error states
 - **Identify support**: Locate/identify command is forwarded to compatible Dreame models
 - **Auto token refresh**: Seamless credential management with Dreame Cloud
 
@@ -52,6 +52,7 @@ Or search for `homebridge-dreame-vacuum-matter` in the Homebridge UI.
 | `username` | — | Dreame/Dreamehome app email. Overridable via `DREAME_EMAIL` env var |
 | `password` | — | Dreame/Dreamehome app password. Overridable via `DREAME_PASSWORD` env var |
 | `country` | `eu` | Cloud region: `cn`, `eu`, `us`, `sg`, `kr`, `ru` |
+| `automationContactSensors` | `false` | Expose HomeKit contact sensors for Apple Home automations |
 
 ## Privacy
 

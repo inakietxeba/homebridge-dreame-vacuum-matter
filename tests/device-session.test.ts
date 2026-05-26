@@ -21,7 +21,7 @@ function createMockAccessory(state?: NormalizedState) {
   } as any;
 }
 
-function createMockAutomationSwitch() {
+function createMockAutomationSensors() {
   return {
     updateState: vi.fn(),
   } as any;
@@ -89,18 +89,18 @@ describe('DeviceSession', () => {
       expect(accessory.onStateUpdate).toHaveBeenCalled();
     });
 
-    it('should update the automation switch from MQTT state', () => {
-      const automationSwitch = createMockAutomationSwitch();
+    it('should update the automation sensors from MQTT state', () => {
+      const automationSensors = createMockAutomationSensors();
       const newState = createInitialState(identity);
       newState.activity.runMode = 'cleaning';
       parser.processProperties.mockReturnValue(newState);
-      const session = new DeviceSession('dev-1', 'TestBot', handlers, accessory, parser, log, automationSwitch);
+      const session = new DeviceSession('dev-1', 'TestBot', handlers, accessory, parser, log, automationSensors);
       const mqttClient = createMockMqtt();
 
       session.connectMqtt(mqttClient as any);
       mqttClient.emit('message', [{ siid: 2, piid: 1, value: 1 }]);
 
-      expect(automationSwitch.updateState).toHaveBeenCalledWith(newState);
+      expect(automationSensors.updateState).toHaveBeenCalledWith(newState);
     });
 
     it('should catch errors from MQTT processing', () => {

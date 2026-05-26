@@ -7,9 +7,13 @@ import { StateParser } from './dreame/parser.js';
 import { MatterCommandHandlers } from './matter/handlers.js';
 import { DreameVacuumAccessory } from './matter/accessory.js';
 import { DeviceSession } from './device-session.js';
-import { createInitialState, Identity, POLL_PROPERTIES } from './dreame/models.js';
+import { createInitialState, Identity, NormalizedState, POLL_PROPERTIES } from './dreame/models.js';
 import { getMatterApi, buildMatterAccessory, reattachHandlers, registerNewMatterAccessory, updateCachedMatterAccessory, cleanupStaleAccessories } from './registration.js';
-import { AUTOMATION_SWITCH_CONTEXT_KIND, CleaningAutomationSwitch } from './homekit/automation-switch.js';
+import {
+  AUTOMATION_CONTACT_SENSORS_CONTEXT_KIND,
+  AutomationContactSensors,
+  LEGACY_AUTOMATION_SWITCH_CONTEXT_KIND,
+} from './homekit/automation-sensors.js';
 
 export class DreameVacuumMatterPlatform implements DynamicPlatformPlugin {
   private readonly config: DreamePlatformConfig;
@@ -20,7 +24,7 @@ export class DreameVacuumMatterPlatform implements DynamicPlatformPlugin {
   private readonly deviceSessions = new Map<string, DeviceSession>();
   private readonly accessoryHandlers = new Map<string, DreameVacuumAccessory>();
   private readonly commandHandlers = new Map<string, MatterCommandHandlers>();
-  private readonly automationSwitches = new Map<string, CleaningAutomationSwitch>();
+  private readonly automationSensors = new Map<string, AutomationContactSensors>();
   private readonly activeHapAccessoryUuids: Set<string> = new Set();
   private isDiscovering = false;
   private readonly tokenRefreshUnsubs: Array<() => void> = [];
@@ -132,9 +136,11 @@ export class DreameVacuumMatterPlatform implements DynamicPlatformPlugin {
       const deviceModel = device.model;
       const deviceName = device.name || deviceModel;
       const uuid = matter.uuid.generate(deviceId);
-      const automationSwitchUuid = this.api.hap.uuid.generate(`${deviceId}:cleaning-automation-switch`);
+      const automationSensorsUuid = this.api.hap.uuid.generate(`${deviceId}:automation-contact-sensors`);
       this.activeAccessoryUuids.add(uuid);
-      this.activeHapAccessoryUuids.add(automationSwitchUuid);
+      if (this.config.automationContactSensors) {
+        this.activeHapAccessoryUuids.add(automationSensorsUuid);
+      }
 
       // Get device info (sets host for sendCommand routing)
       await cloud.getDeviceInfo(deviceId);
@@ -190,13 +196,9 @@ export class DreameVacuumMatterPlatform implements DynamicPlatformPlugin {
 
       if (!setupResult.configured) continue;
 
-      const automationSwitch = this.setupAutomationSwitch(
-        automationSwitchUuid,
-        deviceName,
-        deviceId,
-        deviceModel,
-        initialState,
-      );
+      const automationSensors = this.config.automationContactSensors
+        ? this.setupAutomationSensors(automationSensorsUuid, deviceName, deviceId, deviceModel, initialState)
+        : undefined;
 
       // Create accessory handler for state push
       accessoryHandler = new DreameVacuumAccessory(this.log.getRaw(), uuid, initialState, this.api, {
@@ -214,7 +216,7 @@ export class DreameVacuumMatterPlatform implements DynamicPlatformPlugin {
         accessoryHandler,
         parser,
         this.log,
-        automationSwitch,
+        automationSensors,
       );
 
       // Connect MQTT if bindDomain is available
@@ -253,42 +255,43 @@ export class DreameVacuumMatterPlatform implements DynamicPlatformPlugin {
     this.cleanupStaleHapAccessories();
   }
 
-  private setupAutomationSwitch(
+  private setupAutomationSensors(
     uuid: string,
     deviceName: string,
     deviceId: string,
     model: string,
-    initialState: ReturnType<typeof createInitialState>,
-  ): CleaningAutomationSwitch {
+    initialState: NormalizedState,
+  ): AutomationContactSensors {
     let accessory = this.accessories.find((cached) => cached.UUID === uuid);
 
     if (!accessory) {
-      accessory = new this.api.platformAccessory(`${deviceName} Cleaning`, uuid);
-      accessory.category = this.api.hap.Categories.SWITCH;
+      accessory = new this.api.platformAccessory(`${deviceName} Automation Sensors`, uuid);
+      accessory.category = this.api.hap.Categories.SENSOR;
       this.api.registerPlatformAccessories(
         'homebridge-dreame-vacuum-matter',
         'DreameVacuumMatter',
         [accessory],
       );
       this.accessories.push(accessory);
-      this.log.info(`Registered automation switch: ${deviceName} Cleaning`);
+      this.log.info(`Registered automation contact sensors: ${deviceName}`);
     }
 
-    const automationSwitch = new CleaningAutomationSwitch(this.api, accessory, this.log, deviceName, deviceId, model);
-    automationSwitch.updateState(initialState);
-    this.automationSwitches.set(uuid, automationSwitch);
-    return automationSwitch;
+    const automationSensors = new AutomationContactSensors(this.api, accessory, this.log, deviceName, deviceId, model);
+    automationSensors.updateState(initialState);
+    this.automationSensors.set(uuid, automationSensors);
+    return automationSensors;
   }
 
   private cleanupStaleHapAccessories(): void {
     const stale = this.accessories.filter((accessory) =>
-      accessory.context.kind === AUTOMATION_SWITCH_CONTEXT_KIND
+      (accessory.context.kind === AUTOMATION_CONTACT_SENSORS_CONTEXT_KIND
+        || accessory.context.kind === LEGACY_AUTOMATION_SWITCH_CONTEXT_KIND)
       && !this.activeHapAccessoryUuids.has(accessory.UUID),
     );
 
     if (stale.length === 0) return;
 
-    this.log.info(`Removing ${stale.length} stale automation switch accessory(ies)...`);
+    this.log.info(`Removing ${stale.length} stale automation accessory(ies)...`);
     this.api.unregisterPlatformAccessories(
       'homebridge-dreame-vacuum-matter',
       'DreameVacuumMatter',
@@ -297,7 +300,7 @@ export class DreameVacuumMatterPlatform implements DynamicPlatformPlugin {
     for (const accessory of stale) {
       const index = this.accessories.indexOf(accessory);
       if (index >= 0) this.accessories.splice(index, 1);
-      this.automationSwitches.delete(accessory.UUID);
+      this.automationSensors.delete(accessory.UUID);
     }
   }
 

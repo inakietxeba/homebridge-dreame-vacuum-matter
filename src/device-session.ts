@@ -5,7 +5,7 @@ import { MatterCommandHandlers } from './matter/handlers.js';
 import { DreameVacuumAccessory } from './matter/accessory.js';
 import { StateParser } from './dreame/parser.js';
 import { POLL_PROPERTIES } from './dreame/models.js';
-import { CleaningAutomationSwitch } from './homekit/automation-switch.js';
+import { AutomationContactSensors } from './homekit/automation-sensors.js';
 
 export class DeviceSession {
   private mqttClient: DreameMqttClient | null = null;
@@ -30,7 +30,7 @@ export class DeviceSession {
     private readonly accessoryHandler: DreameVacuumAccessory,
     private readonly parser: StateParser,
     private readonly log: Logger,
-    private readonly automationSwitch?: CleaningAutomationSwitch,
+    private readonly automationSensors?: AutomationContactSensors,
   ) {}
 
   setCloud(cloud: DreameCloud): void {
@@ -131,7 +131,7 @@ export class DeviceSession {
     const resolvedCleanMode = this.handlers.resolveCleanModeForState(decodedCleanMode);
     newState.activity.cleanMode = resolvedCleanMode;
     this.accessoryHandler.onStateUpdate(newState);
-    this.automationSwitch?.updateState(newState);
+    this.automationSensors?.updateState(newState);
     if (resolvedCleanMode !== currentState.activity.cleanMode) {
       this.handlers.syncCleanModeFromDevice(decodedCleanMode);
     }

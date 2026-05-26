@@ -40,6 +40,12 @@
           { "title": "Russia", "enum": ["ru"] }
         ],
         "description": "Dreame Cloud region — must match your Dreamehome app region."
+      },
+      "automationContactSensors": {
+        "title": "Expose Automation Contact Sensors",
+        "type": "boolean",
+        "default": false,
+        "description": "Expose optional HomeKit contact sensors for automations: Idle, Busy, Cleaning, and Error. Disabled by default."
       }
     }
   }
