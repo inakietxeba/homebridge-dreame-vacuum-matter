@@ -1,4 +1,4 @@
-import { API, DynamicPlatformPlugin, Logger as HomebridgeLogger, PlatformConfig, PlatformAccessory } from 'homebridge';
+import type { API, DynamicPlatformPlugin, Logger as HomebridgeLogger, MatterAccessory, MatterAPI, PlatformAccessory, PlatformConfig } from 'homebridge';
 import { DreamePlatformConfig, parsePlatformConfig } from './config';
 import { Logger } from './util/logger';
 import { DreameCloud } from './dreame/cloud';
@@ -7,8 +7,8 @@ import { StateParser } from './dreame/parser';
 import { MatterCommandHandlers } from './matter/handlers';
 import { DreameVacuumAccessory } from './matter/accessory';
 import { DeviceSession } from './device-session';
-import { createInitialState, Identity, RoomInfo, MapRooms, POLL_PROPERTIES } from './dreame/models';
-import { getMatterApi, registerOrUpdateMatterAccessory, cleanupStaleAccessories } from './registration';
+import { createInitialState, Identity, POLL_PROPERTIES } from './dreame/models';
+import { getMatterApi, buildMatterAccessory, reattachHandlers, registerNewMatterAccessory, updateCachedMatterAccessory, cleanupStaleAccessories } from './registration';
 
 const PLATFORM_NAME = 'DreameVacuumMatter';
 
@@ -16,9 +16,13 @@ export class DreameVacuumMatterPlatform implements DynamicPlatformPlugin {
   private readonly config: DreamePlatformConfig;
   private readonly log: Logger;
   public readonly accessories: PlatformAccessory[] = [];
+  private readonly matterAccessories = new Map<string, MatterAccessory>();
   private readonly activeAccessoryUuids: Set<string> = new Set();
   private readonly deviceSessions = new Map<string, DeviceSession>();
   private readonly accessoryHandlers = new Map<string, DreameVacuumAccessory>();
+  private readonly commandHandlers = new Map<string, MatterCommandHandlers>();
+  private isDiscovering = false;
+  private readonly tokenRefreshUnsubs: Array<() => void> = [];
 
   constructor(
     log: HomebridgeLogger,
@@ -37,7 +41,9 @@ export class DreameVacuumMatterPlatform implements DynamicPlatformPlugin {
 
     this.api.on('didFinishLaunching', () => {
       this.log.debug('Executed didFinishLaunching callback');
-      void this.discoverDevices();
+      this.discoverDevices().catch((err) => {
+        this.log.error(`Device discovery failed: ${err instanceof Error ? err.message : String(err)}`);
+      });
     });
 
     this.api.on('shutdown', () => {
@@ -46,26 +52,55 @@ export class DreameVacuumMatterPlatform implements DynamicPlatformPlugin {
     });
   }
 
+  /**
+   * Required by DynamicPlatformPlugin interface (for HAP accessories).
+   * Not used for Matter accessories.
+   */
   configureAccessory(accessory: PlatformAccessory): void {
-    this.log.info('Loading accessory from cache:', accessory.displayName);
+    this.log.debug('Loading HAP accessory from cache:', accessory.displayName);
     this.accessories.push(accessory);
   }
 
-  async discoverDevices(): Promise<void> {
-    this.log.info('Discovering Dreame devices...');
-    const matterApi = getMatterApi(this.api as unknown as { matter?: ReturnType<typeof getMatterApi> });
+  /**
+   * Called by Homebridge for each cached Matter accessory on startup.
+   * This is the Matter equivalent of configureAccessory().
+   * Re-attach handlers in didFinishLaunching, not here — keep this callback fast.
+   */
+  configureMatterAccessory(accessory: MatterAccessory): void {
+    this.log.info('Loading Matter accessory from cache:', accessory.displayName);
+    this.log.debug(`  UUID=${accessory.UUID}, context=${JSON.stringify(accessory.context)}`);
+    this.matterAccessories.set(accessory.UUID, accessory);
+  }
 
-    if (matterApi?.isMatterAvailable && !matterApi.isMatterAvailable()) {
-      this.log.error('Matter API is unavailable. Requires Homebridge >= 2.0.0-beta.0.');
+  async discoverDevices(): Promise<void> {
+    if (this.isDiscovering) {
+      this.log.warn('Device discovery already in progress, skipping.');
       return;
     }
-    if (matterApi?.isMatterEnabled && !matterApi.isMatterEnabled()) {
-      this.log.warn('Matter is disabled for this bridge.');
+    this.isDiscovering = true;
+    try {
+      await this.discoverDevicesInternal();
+    } finally {
+      this.isDiscovering = false;
+    }
+  }
+
+  private async discoverDevicesInternal(): Promise<void> {
+    this.log.info('Discovering Dreame devices...');
+    const matter = getMatterApi(this.api);
+
+    if (!matter) {
+      this.log.error('Matter API is unavailable. Requires Homebridge >= 2.0.0-beta.0 with Matter enabled.');
       return;
     }
 
     this.activeAccessoryUuids.clear();
     this.disconnectAllSessions();
+
+    this.log.info(`${this.matterAccessories.size} cached Matter accessory(ies) found`);
+
+    // Phase 1: Re-attach placeholder handlers to cached accessories immediately
+    this.restoreCachedAccessories(matter);
 
     // Authenticate with Dreame Cloud
     const cloud = new DreameCloud(this.log);
@@ -82,7 +117,7 @@ export class DreameVacuumMatterPlatform implements DynamicPlatformPlugin {
     const devices = await cloud.getDevices();
     if (!devices || devices.length === 0) {
       this.log.warn('No Dreame devices found under this account.');
-      if (matterApi) await cleanupStaleAccessories(matterApi, this.accessories, this.activeAccessoryUuids, this.log);
+      await cleanupStaleAccessories(matter, this.matterAccessories, this.activeAccessoryUuids, this.log);
       return;
     }
 
@@ -93,15 +128,20 @@ export class DreameVacuumMatterPlatform implements DynamicPlatformPlugin {
       const deviceId = device.did;
       const deviceModel = device.model;
       const deviceName = device.name || deviceModel;
-      const uuid = this.api.hap.uuid.generate(deviceId);
+      const uuid = matter.uuid.generate(deviceId);
       this.activeAccessoryUuids.add(uuid);
 
       // Get device info (sets host for sendCommand routing)
       await cloud.getDeviceInfo(deviceId);
 
-      // Build command handlers (direct cloud calls, no wrapper)
-      const handlers = new MatterCommandHandlers(cloud, deviceId, this.log);
-      let accessoryHandler: DreameVacuumAccessory | undefined;
+      // Build command handlers — reuse Phase 1 handler if available, otherwise create new
+      let handlers = this.commandHandlers.get(uuid);
+      if (handlers) {
+        handlers.setCloud(cloud);
+      } else {
+        handlers = new MatterCommandHandlers(cloud, deviceId, this.log);
+      }
+      let accessoryHandler: DreameVacuumAccessory | undefined = this.accessoryHandlers.get(uuid);
       handlers.setOnCleanModeSelected((mode) => {
         accessoryHandler?.applyUserCleanMode(mode);
       });
@@ -122,41 +162,36 @@ export class DreameVacuumMatterPlatform implements DynamicPlatformPlugin {
           Object.assign(initialState, parsed);
         }
       } catch (err: unknown) {
-        this.log.warn(`Failed to fetch initial state for ${deviceName}, using defaults. Device may not reflect actual state: ${err instanceof Error ? err.message : String(err)}`);
+        this.log.warn(`Failed to fetch initial state for ${deviceName}, using defaults: ${err instanceof Error ? err.message : String(err)}`);
       }
 
-      // Find or create accessory
-      let accessory = this.accessories.find((acc) => acc.UUID === uuid);
-      const isNewAccessory = !accessory;
+      // Check if this device was cached
+      const cachedAccessory = this.matterAccessories.get(uuid);
+      let setupResult;
 
-      if (isNewAccessory) {
-        accessory = new this.api.platformAccessory(deviceName, uuid);
-        accessory.category = this.api.hap.Categories.OTHER;
+      if (cachedAccessory) {
+        // Cached: re-attach handlers with real cloud connection and update metadata
+        reattachHandlers(cachedAccessory, handlers, matter, this.log);
+        setupResult = await updateCachedMatterAccessory(matter, cachedAccessory, this.log);
+      } else {
+        // New: build and register a fresh MatterAccessory
+        const newAccessory = buildMatterAccessory(matter, handlers, identity, initialState, deviceName, this.log);
+        if (!newAccessory) continue;
+        setupResult = await registerNewMatterAccessory(matter, newAccessory, this.log);
+        if (setupResult.configured) {
+          this.matterAccessories.set(uuid, newAccessory);
+        }
       }
 
-      // Register Matter accessory
-      if (!matterApi) continue;
-      const setupResult = await registerOrUpdateMatterAccessory(
-        matterApi,
-        accessory!,
-        isNewAccessory,
-        handlers,
-        identity,
-        initialState,
-        this.log,
-        this.accessories,
-        () => accessoryHandler?.getCurrentState() ?? initialState,
-      );
       if (!setupResult.configured) continue;
 
-      // Create accessory handler
-      accessoryHandler = new DreameVacuumAccessory(this.log.getRaw(), accessory!, initialState, this.api, {
+      // Create accessory handler for state push
+      accessoryHandler = new DreameVacuumAccessory(this.log.getRaw(), uuid, initialState, this.api, {
         disableMatterStatePush: !setupResult.statePushSupported,
-        serviceAreaActive: setupResult.serviceAreaActive,
-        onRoomsDiscovered: (rooms, knownMaps) => this.handleRoomsDiscovered(uuid, rooms, knownMaps),
       });
       accessoryHandler.markRegistered();
       this.accessoryHandlers.set(uuid, accessoryHandler);
+      this.commandHandlers.set(uuid, handlers);
 
       // Create device session with MQTT
       const session = new DeviceSession(
@@ -182,9 +217,10 @@ export class DreameVacuumMatterPlatform implements DynamicPlatformPlugin {
         const mqttClient = new DreameMqttClient(this.log, mqttInfo);
 
         // Wire token refresh
-        cloud.onTokenRefresh((newToken) => {
+        const unsub = cloud.onTokenRefresh((newToken) => {
           mqttClient.updateToken(newToken);
         });
+        this.tokenRefreshUnsubs.push(unsub);
 
         session.connectMqtt(mqttClient);
         this.log.info(`MQTT provisioned for ${deviceName} via ${device.bindDomain}`);
@@ -192,25 +228,55 @@ export class DreameVacuumMatterPlatform implements DynamicPlatformPlugin {
         this.log.warn(`No MQTT endpoint for ${deviceName} — state updates via polling only`);
       }
 
-      // Enable HTTP polling backup (adaptive: 15s/60s/180s like original HomeKit plugin)
+      // Enable HTTP polling backup
       session.setCloud(cloud);
 
       this.deviceSessions.set(uuid, session);
       this.log.info(`Device ${deviceName} (${deviceId}) ready — model: ${deviceModel}`);
     }
 
-    if (matterApi) await cleanupStaleAccessories(matterApi, this.accessories, this.activeAccessoryUuids, this.log);
+    await cleanupStaleAccessories(matter, this.matterAccessories, this.activeAccessoryUuids, this.log);
   }
 
-  private handleRoomsDiscovered(uuid: string, rooms: RoomInfo[], knownMaps: MapRooms[]): void {
-    this.log.info(`Rooms discovered for ${uuid}: ${rooms.map((r) => r.name).join(', ')}`);
+  /**
+   * Phase 1: Re-attach placeholder handlers to cached Matter accessories.
+   * configureMatterAccessory() was already called by Homebridge for each cached
+   * Matter accessory. Here we re-wire command handlers so the accessory responds
+   * immediately (with placeholder handlers until cloud auth completes).
+   */
+  private restoreCachedAccessories(matter: MatterAPI): void {
+    let restoredCount = 0;
+
+    for (const [uuid, accessory] of this.matterAccessories) {
+      const ctx = accessory.context as { deviceId?: string; model?: string; firmware?: string } | undefined;
+      const name = accessory.displayName ?? uuid;
+      if (!ctx?.deviceId || !ctx?.model) {
+        this.log.debug(`Phase 1: skipping ${name} — missing deviceId or model in context`);
+        continue;
+      }
+
+      // Create placeholder handlers (no cloud yet — commands will fail gracefully)
+      const handlers = new MatterCommandHandlers(null, ctx.deviceId, this.log);
+      reattachHandlers(accessory, handlers, matter, this.log);
+      this.commandHandlers.set(uuid, handlers);
+      restoredCount++;
+    }
+
+    if (restoredCount > 0) {
+      this.log.info(`Phase 1: Restored ${restoredCount} cached Matter accessory(ies) with placeholder handlers`);
+    }
   }
 
   private disconnectAllSessions(): void {
+    for (const unsub of this.tokenRefreshUnsubs) {
+      unsub();
+    }
+    this.tokenRefreshUnsubs.length = 0;
     for (const session of this.deviceSessions.values()) {
       session.dispose();
     }
     this.deviceSessions.clear();
     this.accessoryHandlers.clear();
+    this.commandHandlers.clear();
   }
 }

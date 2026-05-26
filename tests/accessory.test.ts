@@ -24,18 +24,6 @@ function createMockApi(updateFn?: (...args: unknown[]) => void | Promise<void>) 
   } as any;
 }
 
-function createMockAccessory() {
-  const infoService = {
-    setCharacteristic: vi.fn().mockReturnThis(),
-  };
-  return {
-    UUID: 'test-uuid-123',
-    displayName: 'Test Vacuum',
-    getService: vi.fn((name: string) => name === 'AccessoryInformation' ? infoService : null),
-    removeService: vi.fn(),
-  } as any;
-}
-
 function createMockLogger() {
   return { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() } as any;
 }
@@ -54,7 +42,7 @@ describe('DreameVacuumAccessory', () => {
       const updateFn = vi.fn().mockResolvedValue(undefined);
       const api = createMockApi(updateFn);
       const accessory = new DreameVacuumAccessory(
-        createMockLogger(), createMockAccessory(), createInitialState(identity), api,
+        createMockLogger(), 'test-uuid-123', createInitialState(identity), api,
       );
       accessory.markRegistered();
 
@@ -74,7 +62,7 @@ describe('DreameVacuumAccessory', () => {
       const updateFn = vi.fn().mockResolvedValue(undefined);
       const api = createMockApi(updateFn);
       const accessory = new DreameVacuumAccessory(
-        createMockLogger(), createMockAccessory(), createInitialState(identity), api,
+        createMockLogger(), 'test-uuid-123', createInitialState(identity), api,
       );
       accessory.markRegistered();
       vi.advanceTimersByTime(100);
@@ -93,7 +81,7 @@ describe('DreameVacuumAccessory', () => {
       const updateFn = vi.fn().mockResolvedValue(undefined);
       const api = createMockApi(updateFn);
       const accessory = new DreameVacuumAccessory(
-        createMockLogger(), createMockAccessory(), createInitialState(identity), api,
+        createMockLogger(), 'test-uuid-123', createInitialState(identity), api,
       );
       accessory.markRegistered();
       vi.advanceTimersByTime(100);
@@ -122,7 +110,7 @@ describe('DreameVacuumAccessory', () => {
       const updateFn = vi.fn().mockResolvedValue(undefined);
       const api = createMockApi(updateFn);
       const accessory = new DreameVacuumAccessory(
-        createMockLogger(), createMockAccessory(), createInitialState(identity), api,
+        createMockLogger(), 'test-uuid-123', createInitialState(identity), api,
       );
       accessory.markRegistered();
 
@@ -146,7 +134,7 @@ describe('DreameVacuumAccessory', () => {
       });
       const api = createMockApi(updateFn);
       const accessory = new DreameVacuumAccessory(
-        createMockLogger(), createMockAccessory(), createInitialState(identity), api,
+        createMockLogger(), 'test-uuid-123', createInitialState(identity), api,
       );
       accessory.markRegistered();
 
@@ -167,7 +155,7 @@ describe('DreameVacuumAccessory', () => {
       });
       const api = createMockApi(updateFn);
       const accessory = new DreameVacuumAccessory(
-        log, createMockAccessory(), createInitialState(identity), api,
+        log, 'test-uuid-123', createInitialState(identity), api,
       );
       accessory.markRegistered();
 
@@ -186,21 +174,15 @@ describe('DreameVacuumAccessory', () => {
       const updateFn = vi.fn().mockRejectedValue(new Error('unknown session'));
       const api = createMockApi(updateFn);
       const accessory = new DreameVacuumAccessory(
-        log, createMockAccessory(), createInitialState(identity), api,
+        log, 'test-uuid-123', createInitialState(identity), api,
       );
       accessory.markRegistered();
 
-      // Each sync cycle: debounce 100ms → doSync → all pushes fail → counter++
-      // Then we update state to force a new sync (different state bypasses dedup)
-      for (let i = 0; i < 5; i++) {
-        await vi.advanceTimersByTimeAsync(200);
-        const s = createInitialState(identity);
-        s.power.batteryPercent = (i + 1) * 10;
-        accessory.onStateUpdate(s);
-      }
-
-      // Let all retries and debounce settle
-      await vi.advanceTimersByTimeAsync(10_000);
+      // Transient session errors now use a short backoff, adapted from the
+      // Eufy plugin, before the circuit breaker pauses pushes.
+      await vi.advanceTimersByTimeAsync(100);
+      await vi.advanceTimersByTimeAsync(30_100);
+      await vi.advanceTimersByTimeAsync(30_100);
 
       // Should have warned about pausing
       const warned = log.warn.mock.calls.some(
@@ -223,7 +205,7 @@ describe('DreameVacuumAccessory', () => {
     it('should clean up all timers', () => {
       const api = createMockApi();
       const accessory = new DreameVacuumAccessory(
-        createMockLogger(), createMockAccessory(), createInitialState(identity), api,
+        createMockLogger(), 'test-uuid-123', createInitialState(identity), api,
       );
       accessory.markRegistered();
       accessory.dispose();

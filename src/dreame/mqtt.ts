@@ -41,8 +41,13 @@ export class DreameMqttClient extends EventEmitter {
     this.connectionInfo.accessToken = accessToken;
     if (this.client && this._connected) {
       this.log.debug('Updating MQTT credentials after token refresh');
-      this.client.end(true);
-      this.connectInternal();
+      const oldClient = this.client;
+      this.client = null;
+      this._connected = false;
+      oldClient.removeAllListeners();
+      oldClient.end(true, () => {
+        this.connectInternal();
+      });
     }
   }
 

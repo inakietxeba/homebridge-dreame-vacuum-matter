@@ -14,6 +14,7 @@ export class DeviceSession {
   private isPolling = false;
   private disposed = false;
   private consecutivePollFailures = 0;
+  private mqttListenersAttached = false;
 
   /** Polling intervals. */
   private static readonly POLL_ACTIVE_MS = 15_000;       // 15s when cleaning without MQTT
@@ -36,7 +37,15 @@ export class DeviceSession {
   }
 
   connectMqtt(mqttClient: DreameMqttClient): void {
+    if (this.mqttClient) {
+      this.mqttClient.removeAllListeners();
+    }
     this.mqttClient = mqttClient;
+
+    if (this.mqttListenersAttached) {
+      mqttClient.removeAllListeners();
+    }
+    this.mqttListenersAttached = true;
 
     mqttClient.on('message', (properties) => {
       try {
@@ -107,7 +116,9 @@ export class DeviceSession {
       this.log[level](`HTTP poll failed for ${this.deviceName} (attempt ${this.consecutivePollFailures}): ${err instanceof Error ? err.message : String(err)}`);
     } finally {
       this.isPolling = false;
-      this.schedulePoll();
+      if (!this.disposed) {
+        this.schedulePoll();
+      }
     }
   }
 
@@ -115,9 +126,10 @@ export class DeviceSession {
     const currentState = this.accessoryHandler.getCurrentState();
     const newState = this.parser.processProperties(properties, currentState);
     const decodedCleanMode = newState.activity.cleanMode;
-    newState.activity.cleanMode = this.handlers.resolveCleanModeForState(decodedCleanMode);
+    const resolvedCleanMode = this.handlers.resolveCleanModeForState(decodedCleanMode);
+    newState.activity.cleanMode = resolvedCleanMode;
     this.accessoryHandler.onStateUpdate(newState);
-    if (decodedCleanMode !== currentState.activity.cleanMode) {
+    if (resolvedCleanMode !== currentState.activity.cleanMode) {
       this.handlers.syncCleanModeFromDevice(decodedCleanMode);
     }
     // Keep suction/water levels in sync so room clean uses correct values

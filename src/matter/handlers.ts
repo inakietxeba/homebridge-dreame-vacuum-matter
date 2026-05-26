@@ -29,12 +29,22 @@ export class MatterCommandHandlers {
   private pendingRoomIds: number[] | null = null;
 
   constructor(
-    private readonly cloud: DreameCloud,
+    private cloud: DreameCloud | null,
     private readonly deviceId: string,
     private readonly log: Logger,
     defaultCleanMode: CleaningMode = 'SWEEP_AND_MOP',
   ) {
     this.currentCleanMode = defaultCleanMode;
+  }
+
+  /** Replace the cloud instance (used when Phase 1 placeholder is upgraded with a real connection). */
+  public setCloud(cloud: DreameCloud): void {
+    this.cloud = cloud;
+  }
+
+  private requireCloud(): DreameCloud {
+    if (!this.cloud) throw new Error('Cloud connection not available yet');
+    return this.cloud;
   }
 
   public setOnCleanModeSelected(callback: (mode: CleaningMode) => void): void {
@@ -71,13 +81,13 @@ export class MatterCommandHandlers {
         this.getCurrentWaterLevel(),
         index + 1,
       ]);
-      await this.cloud.setProperties(this.deviceId, [
+      await this.requireCloud().setProperties(this.deviceId, [
         { did: this.deviceId, siid: MIOT.VACUUM.siid, piid: MIOT.VACUUM.CLEANING_PROPERTIES, value: JSON.stringify({ selects }) },
       ]);
       this.log.debug(`Room clean sent for rooms [${roomsToClean.join(', ')}]`);
     }
 
-    await this.cloud.action(this.deviceId, MIOT.VACUUM.siid, MIOT.ACTION.START);
+    await this.requireCloud().action(this.deviceId, MIOT.VACUUM.siid, MIOT.ACTION.START);
     // Clear pending rooms only after START succeeds
     if (roomsToClean) this.pendingRoomIds = null;
     this.log.debug('START_CLEANING sent successfully');
@@ -101,23 +111,23 @@ export class MatterCommandHandlers {
 
   public async handleStopCommand(): Promise<void> {
     this.log.info('Handling Matter Stop Command...');
-    await this.cloud.action(this.deviceId, MIOT.VACUUM.siid, MIOT.ACTION.STOP);
+    await this.requireCloud().action(this.deviceId, MIOT.VACUUM.siid, MIOT.ACTION.STOP);
   }
 
   public async handlePauseCommand(): Promise<void> {
     if (this.pauseSuppression.isActive) return;
-    await this.cloud.action(this.deviceId, MIOT.VACUUM.siid, MIOT.ACTION.PAUSE);
+    await this.requireCloud().action(this.deviceId, MIOT.VACUUM.siid, MIOT.ACTION.PAUSE);
   }
 
   public async handleResumeCommand(): Promise<void> {
     this.suppressPauseForCommandSequence();
-    await this.cloud.action(this.deviceId, MIOT.VACUUM.siid, MIOT.ACTION.START);
+    await this.requireCloud().action(this.deviceId, MIOT.VACUUM.siid, MIOT.ACTION.START);
   }
 
   public async handleGoHomeCommand(): Promise<void> {
     this.log.info('Handling Matter Go Home Command...');
     this.suppressPauseForCommandSequence();
-    await this.cloud.action(this.deviceId, MIOT.CHARGE.siid, MIOT.ACTION.DOCK);
+    await this.requireCloud().action(this.deviceId, MIOT.CHARGE.siid, MIOT.ACTION.DOCK);
   }
 
   public async handleCleaningMode(mode: CleaningMode): Promise<void> {
@@ -136,14 +146,14 @@ export class MatterCommandHandlers {
 
   public async handleSuctionLevel(level: 0 | 1 | 2 | 3): Promise<void> {
     this._suctionLevel = level;
-    await this.cloud.setProperties(this.deviceId, [
+    await this.requireCloud().setProperties(this.deviceId, [
       { did: this.deviceId, siid: MIOT.VACUUM.siid, piid: MIOT.VACUUM.SUCTION, value: level },
     ]);
   }
 
   public async handleWaterLevel(level: 1 | 2 | 3): Promise<void> {
     this._waterLevel = level;
-    await this.cloud.setProperties(this.deviceId, [
+    await this.requireCloud().setProperties(this.deviceId, [
       { did: this.deviceId, siid: MIOT.VACUUM.siid, piid: MIOT.VACUUM.WATER, value: level },
     ]);
   }
@@ -167,7 +177,7 @@ export class MatterCommandHandlers {
   }
 
   private async setCleaningMode(mode: CleaningMode): Promise<void> {
-    await this.cloud.setProperties(this.deviceId, [
+    await this.requireCloud().setProperties(this.deviceId, [
       { did: this.deviceId, siid: MIOT.VACUUM.siid, piid: MIOT.VACUUM.CLEAN_MODE, value: CLEANING_MODE_TO_VALUE[mode] },
     ]);
   }

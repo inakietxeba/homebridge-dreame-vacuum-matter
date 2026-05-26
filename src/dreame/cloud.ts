@@ -42,7 +42,8 @@ export class DreameCloud {
   private _username: string | null = null;
   private _password: string | null = null;
   private _uid: string | null = null;
-  private _onTokenRefresh: ((newToken: string) => void) | null = null;
+  private _onTokenRefreshCallbacks: Array<(newToken: string) => void> = [];
+  private _refreshPromise: Promise<void> | null = null;
 
   constructor(private readonly log: Logger) {
     this.country = 'eu';
@@ -53,8 +54,12 @@ export class DreameCloud {
   get token(): string | null { return this.accessToken; }
   get countryCode(): string { return this.country; }
 
-  onTokenRefresh(callback: (newToken: string) => void): void {
-    this._onTokenRefresh = callback;
+  onTokenRefresh(callback: (newToken: string) => void): () => void {
+    this._onTokenRefreshCallbacks.push(callback);
+    return () => {
+      const idx = this._onTokenRefreshCallbacks.indexOf(callback);
+      if (idx >= 0) this._onTokenRefreshCallbacks.splice(idx, 1);
+    };
   }
 
   setCountry(country: string): void {
@@ -137,17 +142,32 @@ export class DreameCloud {
 
   private async ensureToken(): Promise<void> {
     if (this.tokenExpireTime > 0 && Date.now() > this.tokenExpireTime) {
-      try {
-        await this.refreshLogin();
-      } catch {
-        if (this._username && this._password) {
-          this.log.warn('Refresh token expired, re-logging in...');
-          await this.login(this._username, this._password);
-        } else {
-          throw new Error('Token expired and no stored credentials');
-        }
+      if (this._refreshPromise) {
+        await this._refreshPromise;
+        return;
       }
-      this._onTokenRefresh?.(this.accessToken!);
+      this._refreshPromise = this.performTokenRefresh();
+      try {
+        await this._refreshPromise;
+      } finally {
+        this._refreshPromise = null;
+      }
+    }
+  }
+
+  private async performTokenRefresh(): Promise<void> {
+    try {
+      await this.refreshLogin();
+    } catch {
+      if (this._username && this._password) {
+        this.log.warn('Refresh token expired, re-logging in...');
+        await this.login(this._username, this._password);
+      } else {
+        throw new Error('Token expired and no stored credentials');
+      }
+    }
+    for (const cb of this._onTokenRefreshCallbacks) {
+      cb(this.accessToken!);
     }
   }
 
