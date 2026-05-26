@@ -266,7 +266,7 @@ export class MatterMappers {
     const errorStateId = (code !== undefined && ERROR_CODE_TO_MATTER[code] !== undefined)
       ? ERROR_CODE_TO_MATTER[code]!
       : MatterOperationalErrorState.STUCK;
-    return { errorStateId, errorStateLabel: state.activity.activeError };
+    return { errorStateId };
   }
 
   public static mapBatteryLevel(percent: number): number {

@@ -113,6 +113,7 @@ describe('MatterClusterMapper', () => {
       state.activity.activeErrorCode = code;
       const result = MatterMappers.mapOperationalError(state);
       expect(result.errorStateId).toBe(expected);
+      expect(result).not.toHaveProperty('errorStateLabel');
     });
 
     it('should default unmapped codes to STUCK', () => {
