@@ -21,6 +21,12 @@ function createMockAccessory(state?: NormalizedState) {
   } as any;
 }
 
+function createMockAutomationSwitch() {
+  return {
+    updateState: vi.fn(),
+  } as any;
+}
+
 function createMockParser() {
   return {
     processProperties: vi.fn((_props: any, currentState: NormalizedState) => {
@@ -83,6 +89,20 @@ describe('DeviceSession', () => {
       expect(accessory.onStateUpdate).toHaveBeenCalled();
     });
 
+    it('should update the automation switch from MQTT state', () => {
+      const automationSwitch = createMockAutomationSwitch();
+      const newState = createInitialState(identity);
+      newState.activity.runMode = 'cleaning';
+      parser.processProperties.mockReturnValue(newState);
+      const session = new DeviceSession('dev-1', 'TestBot', handlers, accessory, parser, log, automationSwitch);
+      const mqttClient = createMockMqtt();
+
+      session.connectMqtt(mqttClient as any);
+      mqttClient.emit('message', [{ siid: 2, piid: 1, value: 1 }]);
+
+      expect(automationSwitch.updateState).toHaveBeenCalledWith(newState);
+    });
+
     it('should catch errors from MQTT processing', () => {
       const session = new DeviceSession('dev-1', 'TestBot', handlers, accessory, parser, log);
       const mqttClient = createMockMqtt();
@@ -133,6 +153,18 @@ describe('DeviceSession', () => {
       mqttClient.emit('error', new Error('connection lost'));
 
       expect(log.error).toHaveBeenCalledWith(expect.stringContaining('connection lost'));
+    });
+
+    it('should disconnect the previous MQTT client before replacing it', () => {
+      const session = new DeviceSession('dev-1', 'TestBot', handlers, accessory, parser, log);
+      const firstClient = createMockMqtt();
+      const secondClient = createMockMqtt();
+
+      session.connectMqtt(firstClient as any);
+      session.connectMqtt(secondClient as any);
+
+      expect(firstClient.disconnect).toHaveBeenCalled();
+      expect(secondClient.connect).toHaveBeenCalled();
     });
   });
 

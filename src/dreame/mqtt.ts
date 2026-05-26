@@ -1,7 +1,7 @@
 import * as mqtt from 'mqtt';
 import * as crypto from 'crypto';
 import { EventEmitter } from 'events';
-import { Logger } from '../util/logger';
+import { Logger } from '../util/logger.js';
 
 export interface MqttConnectionInfo {
   host: string;
@@ -39,7 +39,7 @@ export class DreameMqttClient extends EventEmitter {
 
   updateToken(accessToken: string): void {
     this.connectionInfo.accessToken = accessToken;
-    if (this.client && this._connected) {
+    if (this.client) {
       this.log.debug('Updating MQTT credentials after token refresh');
       const oldClient = this.client;
       this.client = null;

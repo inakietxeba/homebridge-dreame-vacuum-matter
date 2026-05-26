@@ -1,15 +1,14 @@
 import type {
   API,
   Logger as HomebridgeLogger,
-  MatterAPI,
 } from 'homebridge';
 
 import { isDeepStrictEqual } from 'node:util';
 
-import { CleaningMode } from '../config';
-import { NormalizedState } from '../dreame/models';
-import { MatterClusterMapper, MatterState } from './clusters';
-import { Logger } from '../util/logger';
+import { CleaningMode } from '../config.js';
+import { NormalizedState } from '../dreame/models.js';
+import { MatterClusterMapper, MatterState } from './clusters.js';
+import { Logger } from '../util/logger.js';
 
 export interface DreameVacuumAccessoryOptions {
   disableMatterStatePush?: boolean;

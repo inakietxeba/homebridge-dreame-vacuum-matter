@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { MatterClusterMapper } from '../src/matter/clusters';
-import { createInitialState, RoomInfo, MapRooms } from '../src/dreame/models';
+import { createInitialState, RoomInfo } from '../src/dreame/models';
 
 describe('MatterClusterMapper', () => {
   const identity = { deviceId: 'test-123', model: 'dreame.vacuum.test', firmware: '1.0' };

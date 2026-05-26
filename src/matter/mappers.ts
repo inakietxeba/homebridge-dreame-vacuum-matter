@@ -1,5 +1,5 @@
-import { NormalizedState, PowerState, MaintenanceType } from '../dreame/models';
-import { CleaningMode } from '../config';
+import { NormalizedState, PowerState, MaintenanceType } from '../dreame/models.js';
+import { CleaningMode } from '../config.js';
 
 export enum MatterOperationalState {
   STOPPED = 0x00,

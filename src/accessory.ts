@@ -1,1 +1,1 @@
-export { DreameVacuumAccessory } from './matter/accessory';
+export { DreameVacuumAccessory } from './matter/accessory.js';

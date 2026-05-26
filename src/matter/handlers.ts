@@ -1,7 +1,7 @@
-import { DreameCloud } from '../dreame/cloud';
-import { Logger } from '../util/logger';
-import { CleaningMode } from '../config';
-import { MIOT, SuctionLevel, WaterLevel } from '../dreame/models';
+import { DreameCloud } from '../dreame/cloud.js';
+import { Logger } from '../util/logger.js';
+import { CleaningMode } from '../config.js';
+import { MIOT, SuctionLevel, WaterLevel } from '../dreame/models.js';
 
 const CLEANING_MODE_TO_VALUE: Record<CleaningMode, number> = {
   SWEEP: 0,
@@ -130,6 +130,17 @@ export class MatterCommandHandlers {
     await this.requireCloud().action(this.deviceId, MIOT.CHARGE.siid, MIOT.ACTION.DOCK);
   }
 
+  public async handleLocateCommand(): Promise<void> {
+    this.log.info('Handling Matter Identify Command...');
+    try {
+      const result = await this.requireCloud().action(this.deviceId, MIOT.LOCATE.siid, MIOT.ACTION.LOCATE);
+      this.assertDreameActionSucceeded('LOCATE', result);
+      this.log.debug('LOCATE sent successfully');
+    } catch (err: unknown) {
+      this.log.warn(`Dreame locate action failed or is unsupported by this model: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
   public async handleCleaningMode(mode: CleaningMode): Promise<void> {
     this.currentCleanMode = mode;
     this.modeSuppression.suppress(10_000);
@@ -180,5 +191,14 @@ export class MatterCommandHandlers {
     await this.requireCloud().setProperties(this.deviceId, [
       { did: this.deviceId, siid: MIOT.VACUUM.siid, piid: MIOT.VACUUM.CLEAN_MODE, value: CLEANING_MODE_TO_VALUE[mode] },
     ]);
+  }
+
+  private assertDreameActionSucceeded(actionName: string, result: unknown): void {
+    if (!result || typeof result !== 'object') return;
+
+    const code = (result as { code?: unknown }).code;
+    if (typeof code === 'number' && code !== 0) {
+      throw new Error(`${actionName} returned Dreame code ${code}`);
+    }
   }
 }

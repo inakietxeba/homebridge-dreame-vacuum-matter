@@ -10,7 +10,8 @@ Connects to **Dreame Cloud** for authentication and device commands, and subscri
 - **Real-time state**: MQTT push from Dreame Cloud (battery, cleaning state, errors)
 - **Cleaning modes**: Sweep, Mop, Sweep & Mop — selectable from Apple Home
 - **Operational states**: Running, Paused, Docked, Charging, Seeking Charger, Error
-- **Room support**: ServiceArea cluster with room selection (when configured)
+- **Automation switch**: HomeKit switch accessory that follows cleaning vs idle state for Apple Home automations
+- **Identify support**: Locate/identify command is forwarded to compatible Dreame models
 - **Auto token refresh**: Seamless credential management with Dreame Cloud
 
 ## Requirements
@@ -18,6 +19,7 @@ Connects to **Dreame Cloud** for authentication and device commands, and subscri
 - **Homebridge >= 2.0.0-beta.0** (Matter support required)
 - **Node.js >= 22.12.0** (or >= 24.0.0)
 - A Dreame vacuum connected to the Dreamehome app
+- Matter enabled in Homebridge
 
 ## Installation
 
@@ -51,6 +53,18 @@ Or search for `homebridge-dreame-vacuum-matter` in the Homebridge UI.
 | `password` | — | Dreame/Dreamehome app password. Overridable via `DREAME_PASSWORD` env var |
 | `country` | `eu` | Cloud region: `cn`, `eu`, `us`, `sg`, `kr`, `ru` |
 
+## Privacy
+
+This plugin does not collect analytics, telemetry, usage metrics, or tracking data. It connects to Dreame Cloud only for authentication, device discovery, commands, and MQTT state updates. See [PRIVACY.md](PRIVACY.md) for details.
+
+## Troubleshooting
+
+- **No devices found**: verify the configured region matches the region used in the Dreamehome app.
+- **Matter API is unavailable**: verify you are running Homebridge v2 with Matter enabled.
+- **Login failed**: check the account email, password, and region. If credentials are set via environment variables, `DREAME_EMAIL` and `DREAME_PASSWORD` override the Homebridge UI values.
+- **MQTT unavailable**: the plugin automatically falls back to HTTP polling if the device does not expose an MQTT endpoint.
+- **Rooms/areas are not shown**: Dreame's cloud endpoints used by this plugin do not currently expose a reliable room/map list, so Matter `ServiceArea` is intentionally disabled.
+
 ## Architecture
 
 ```
@@ -79,9 +93,19 @@ Or search for `homebridge-dreame-vacuum-matter` in the Homebridge UI.
 ```bash
 npm run build        # Compile TypeScript
 npm run watch        # Watch mode
+npm run lint         # Lint source and tests
 npm test             # Run tests
 npm run type-check   # Type check without emitting
 ```
+
+## Release Checklist
+
+This repository is prepared for Homebridge verification, but releases are still manual:
+
+1. Run `npm run lint`, `npm run type-check`, `npm run vitest`, and `npm run build`.
+2. Update `CHANGELOG.md`.
+3. Create a GitHub release with release notes.
+4. Publish the package to npm.
 
 ## License
 

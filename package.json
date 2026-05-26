@@ -5,21 +5,32 @@
   "displayName": "Dreame Vacuum Matter",
   "license": "Apache-2.0",
   "author": "inakietxeba",
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/inakietxeba/homebridge-dreame-vacuum-matter.git"
+  },
+  "bugs": {
+    "url": "https://github.com/inakietxeba/homebridge-dreame-vacuum-matter/issues"
+  },
+  "homepage": "https://github.com/inakietxeba/homebridge-dreame-vacuum-matter#readme",
   "main": "dist/index.js",
   "scripts": {
     "build": "rm -rf dist && tsc",
     "watch": "tsc -w",
-    "lint": "eslint \"src/**/*.ts\"",
+    "lint": "eslint \"src/**/*.ts\" \"tests/**/*.ts\"",
     "test": "vitest run --coverage",
     "vitest": "vitest run",
     "type-check": "tsc --noEmit",
     "coverage": "vitest run --coverage",
-    "prepack": "npm run build",
-    "prepare": "npm run build"
+    "prepack": "npm run build"
   },
   "files": [
+    "CHANGELOG.md",
     "dist",
-    "config.schema.json"
+    "config.schema.json",
+    "PRIVACY.md",
+    "SECURITY.md"
   ],
   "keywords": [
     "homebridge",
@@ -39,10 +50,13 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@eslint/js": "^9.39.4",
     "@types/node": "^22.10.0",
+    "@vitest/coverage-v8": "^3.2.1",
+    "eslint": "^9.39.4",
     "homebridge": "^2.0.0-beta.0",
     "typescript": "^5.7.0",
-    "vitest": "^3.2.1",
-    "@vitest/coverage-v8": "^3.2.1"
+    "typescript-eslint": "^8.60.0",
+    "vitest": "^3.2.1"
   }
 }

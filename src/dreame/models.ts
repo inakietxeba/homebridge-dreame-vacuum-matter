@@ -1,4 +1,4 @@
-import type { CleaningMode } from '../config';
+import type { CleaningMode } from '../config.js';
 
 /** Device identity from cloud discovery. */
 export interface Identity {
@@ -43,8 +43,10 @@ export const MIOT = {
   VACUUM: { siid: 4, SUCTION: 4, WATER: 5, CLEANING_PROPERTIES: 10, CLEAN_MODE: 23 },
   /** siid 6 — Charge service. */
   CHARGE: { siid: 6 },
+  /** siid 7 — Find device service. Not present on every Dreame model. */
+  LOCATE: { siid: 7 },
   /** Action IDs. */
-  ACTION: { START: 1, STOP: 2, PAUSE: 3, DOCK: 1 },
+  ACTION: { START: 1, STOP: 2, PAUSE: 3, DOCK: 1, LOCATE: 1 },
 } as const;
 
 /** Properties to poll via HTTP for state updates. */

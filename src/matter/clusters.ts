@@ -1,5 +1,5 @@
-import { MatterMappers } from './mappers';
-import { NormalizedState, RoomInfo } from '../dreame/models';
+import { MatterMappers } from './mappers.js';
+import { NormalizedState, RoomInfo } from '../dreame/models.js';
 
 export interface SupportedArea {
   areaId: number;

@@ -1,4 +1,4 @@
-import { Logger } from '../util/logger';
+import { Logger } from '../util/logger.js';
 import {
   NormalizedState,
   DREAME_STATE,
@@ -7,7 +7,7 @@ import {
   DREAME_MAINTENANCE_TYPE,
   SuctionLevel,
   WaterLevel,
-} from './models';
+} from './models.js';
 
 /**
  * Parses Dreame device properties (siid/piid pairs) into a NormalizedState.
@@ -63,6 +63,9 @@ export class StateParser {
           }
           // Maintenance sub-type
           state.activity.maintenanceType = DREAME_MAINTENANCE_TYPE[numValue];
+          if (numValue === 1) state.activity.cleanMode = 'SWEEP';
+          if (numValue === 7) state.activity.cleanMode = 'MOP';
+          if (numValue === 12) state.activity.cleanMode = 'SWEEP_AND_MOP';
           // Docked states
           const dockedStates = [2, 6, 9, 13]; // idle, charging, washing, charge complete
           if (dockedStates.includes(numValue)) {

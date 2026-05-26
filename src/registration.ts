@@ -1,9 +1,9 @@
 import type { API, MatterAccessory, MatterAPI } from 'homebridge';
-import { CleaningMode } from './config';
-import { Logger } from './util/logger';
-import { MatterCommandHandlers } from './matter/handlers';
-import { MatterClusterMapper } from './matter/clusters';
-import { NormalizedState, Identity } from './dreame/models';
+import { CleaningMode } from './config.js';
+import { Logger } from './util/logger.js';
+import { MatterCommandHandlers } from './matter/handlers.js';
+import { MatterClusterMapper } from './matter/clusters.js';
+import { NormalizedState, Identity } from './dreame/models.js';
 
 const PLUGIN_NAME = 'homebridge-dreame-vacuum-matter';
 const PLATFORM_NAME = 'DreameVacuumMatter';
@@ -33,6 +33,11 @@ function buildHandlers(
   const cn = matter.clusterNames;
 
   return {
+    identify: {
+      identify: wrapHandler('identify.identify', async () => {
+        await handlers.handleLocateCommand();
+      }),
+    },
     rvcRunMode: {
       changeToMode: wrapHandler('rvcRunMode.changeToMode', async (request?: { newMode?: number }) => {
         switch (request?.newMode) {

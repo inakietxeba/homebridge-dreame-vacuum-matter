@@ -1,16 +1,15 @@
 import type { API, DynamicPlatformPlugin, Logger as HomebridgeLogger, MatterAccessory, MatterAPI, PlatformAccessory, PlatformConfig } from 'homebridge';
-import { DreamePlatformConfig, parsePlatformConfig } from './config';
-import { Logger } from './util/logger';
-import { DreameCloud } from './dreame/cloud';
-import { DreameMqttClient, MqttConnectionInfo } from './dreame/mqtt';
-import { StateParser } from './dreame/parser';
-import { MatterCommandHandlers } from './matter/handlers';
-import { DreameVacuumAccessory } from './matter/accessory';
-import { DeviceSession } from './device-session';
-import { createInitialState, Identity, POLL_PROPERTIES } from './dreame/models';
-import { getMatterApi, buildMatterAccessory, reattachHandlers, registerNewMatterAccessory, updateCachedMatterAccessory, cleanupStaleAccessories } from './registration';
-
-const PLATFORM_NAME = 'DreameVacuumMatter';
+import { DreamePlatformConfig, parsePlatformConfig } from './config.js';
+import { Logger } from './util/logger.js';
+import { DreameCloud } from './dreame/cloud.js';
+import { DreameMqttClient, MqttConnectionInfo } from './dreame/mqtt.js';
+import { StateParser } from './dreame/parser.js';
+import { MatterCommandHandlers } from './matter/handlers.js';
+import { DreameVacuumAccessory } from './matter/accessory.js';
+import { DeviceSession } from './device-session.js';
+import { createInitialState, Identity, POLL_PROPERTIES } from './dreame/models.js';
+import { getMatterApi, buildMatterAccessory, reattachHandlers, registerNewMatterAccessory, updateCachedMatterAccessory, cleanupStaleAccessories } from './registration.js';
+import { AUTOMATION_SWITCH_CONTEXT_KIND, CleaningAutomationSwitch } from './homekit/automation-switch.js';
 
 export class DreameVacuumMatterPlatform implements DynamicPlatformPlugin {
   private readonly config: DreamePlatformConfig;
@@ -21,6 +20,8 @@ export class DreameVacuumMatterPlatform implements DynamicPlatformPlugin {
   private readonly deviceSessions = new Map<string, DeviceSession>();
   private readonly accessoryHandlers = new Map<string, DreameVacuumAccessory>();
   private readonly commandHandlers = new Map<string, MatterCommandHandlers>();
+  private readonly automationSwitches = new Map<string, CleaningAutomationSwitch>();
+  private readonly activeHapAccessoryUuids: Set<string> = new Set();
   private isDiscovering = false;
   private readonly tokenRefreshUnsubs: Array<() => void> = [];
 
@@ -95,6 +96,7 @@ export class DreameVacuumMatterPlatform implements DynamicPlatformPlugin {
     }
 
     this.activeAccessoryUuids.clear();
+    this.activeHapAccessoryUuids.clear();
     this.disconnectAllSessions();
 
     this.log.info(`${this.matterAccessories.size} cached Matter accessory(ies) found`);
@@ -118,6 +120,7 @@ export class DreameVacuumMatterPlatform implements DynamicPlatformPlugin {
     if (!devices || devices.length === 0) {
       this.log.warn('No Dreame devices found under this account.');
       await cleanupStaleAccessories(matter, this.matterAccessories, this.activeAccessoryUuids, this.log);
+      this.cleanupStaleHapAccessories();
       return;
     }
 
@@ -129,7 +132,9 @@ export class DreameVacuumMatterPlatform implements DynamicPlatformPlugin {
       const deviceModel = device.model;
       const deviceName = device.name || deviceModel;
       const uuid = matter.uuid.generate(deviceId);
+      const automationSwitchUuid = this.api.hap.uuid.generate(`${deviceId}:cleaning-automation-switch`);
       this.activeAccessoryUuids.add(uuid);
+      this.activeHapAccessoryUuids.add(automationSwitchUuid);
 
       // Get device info (sets host for sendCommand routing)
       await cloud.getDeviceInfo(deviceId);
@@ -146,7 +151,7 @@ export class DreameVacuumMatterPlatform implements DynamicPlatformPlugin {
         accessoryHandler?.applyUserCleanMode(mode);
       });
 
-      const firmware = cloud.lastDeviceFirmware ?? '1.0';
+      const firmware = cloud.getDeviceFirmware(deviceId) ?? '1.0';
       const identity: Identity = { deviceId, model: deviceModel, firmware };
       const initialState = createInitialState(identity);
 
@@ -185,6 +190,14 @@ export class DreameVacuumMatterPlatform implements DynamicPlatformPlugin {
 
       if (!setupResult.configured) continue;
 
+      const automationSwitch = this.setupAutomationSwitch(
+        automationSwitchUuid,
+        deviceName,
+        deviceId,
+        deviceModel,
+        initialState,
+      );
+
       // Create accessory handler for state push
       accessoryHandler = new DreameVacuumAccessory(this.log.getRaw(), uuid, initialState, this.api, {
         disableMatterStatePush: !setupResult.statePushSupported,
@@ -201,6 +214,7 @@ export class DreameVacuumMatterPlatform implements DynamicPlatformPlugin {
         accessoryHandler,
         parser,
         this.log,
+        automationSwitch,
       );
 
       // Connect MQTT if bindDomain is available
@@ -236,6 +250,55 @@ export class DreameVacuumMatterPlatform implements DynamicPlatformPlugin {
     }
 
     await cleanupStaleAccessories(matter, this.matterAccessories, this.activeAccessoryUuids, this.log);
+    this.cleanupStaleHapAccessories();
+  }
+
+  private setupAutomationSwitch(
+    uuid: string,
+    deviceName: string,
+    deviceId: string,
+    model: string,
+    initialState: ReturnType<typeof createInitialState>,
+  ): CleaningAutomationSwitch {
+    let accessory = this.accessories.find((cached) => cached.UUID === uuid);
+
+    if (!accessory) {
+      accessory = new this.api.platformAccessory(`${deviceName} Cleaning`, uuid);
+      accessory.category = this.api.hap.Categories.SWITCH;
+      this.api.registerPlatformAccessories(
+        'homebridge-dreame-vacuum-matter',
+        'DreameVacuumMatter',
+        [accessory],
+      );
+      this.accessories.push(accessory);
+      this.log.info(`Registered automation switch: ${deviceName} Cleaning`);
+    }
+
+    const automationSwitch = new CleaningAutomationSwitch(this.api, accessory, this.log, deviceName, deviceId, model);
+    automationSwitch.updateState(initialState);
+    this.automationSwitches.set(uuid, automationSwitch);
+    return automationSwitch;
+  }
+
+  private cleanupStaleHapAccessories(): void {
+    const stale = this.accessories.filter((accessory) =>
+      accessory.context.kind === AUTOMATION_SWITCH_CONTEXT_KIND
+      && !this.activeHapAccessoryUuids.has(accessory.UUID),
+    );
+
+    if (stale.length === 0) return;
+
+    this.log.info(`Removing ${stale.length} stale automation switch accessory(ies)...`);
+    this.api.unregisterPlatformAccessories(
+      'homebridge-dreame-vacuum-matter',
+      'DreameVacuumMatter',
+      stale,
+    );
+    for (const accessory of stale) {
+      const index = this.accessories.indexOf(accessory);
+      if (index >= 0) this.accessories.splice(index, 1);
+      this.automationSwitches.delete(accessory.UUID);
+    }
   }
 
   /**

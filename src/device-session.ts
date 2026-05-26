@@ -1,10 +1,11 @@
-import { Logger } from './util/logger';
-import { DreameMqttClient } from './dreame/mqtt';
-import { DreameCloud } from './dreame/cloud';
-import { MatterCommandHandlers } from './matter/handlers';
-import { DreameVacuumAccessory } from './matter/accessory';
-import { StateParser } from './dreame/parser';
-import { POLL_PROPERTIES } from './dreame/models';
+import { Logger } from './util/logger.js';
+import { DreameMqttClient } from './dreame/mqtt.js';
+import { DreameCloud } from './dreame/cloud.js';
+import { MatterCommandHandlers } from './matter/handlers.js';
+import { DreameVacuumAccessory } from './matter/accessory.js';
+import { StateParser } from './dreame/parser.js';
+import { POLL_PROPERTIES } from './dreame/models.js';
+import { CleaningAutomationSwitch } from './homekit/automation-switch.js';
 
 export class DeviceSession {
   private mqttClient: DreameMqttClient | null = null;
@@ -29,6 +30,7 @@ export class DeviceSession {
     private readonly accessoryHandler: DreameVacuumAccessory,
     private readonly parser: StateParser,
     private readonly log: Logger,
+    private readonly automationSwitch?: CleaningAutomationSwitch,
   ) {}
 
   setCloud(cloud: DreameCloud): void {
@@ -38,7 +40,7 @@ export class DeviceSession {
 
   connectMqtt(mqttClient: DreameMqttClient): void {
     if (this.mqttClient) {
-      this.mqttClient.removeAllListeners();
+      this.mqttClient.disconnect();
     }
     this.mqttClient = mqttClient;
 
@@ -129,6 +131,7 @@ export class DeviceSession {
     const resolvedCleanMode = this.handlers.resolveCleanModeForState(decodedCleanMode);
     newState.activity.cleanMode = resolvedCleanMode;
     this.accessoryHandler.onStateUpdate(newState);
+    this.automationSwitch?.updateState(newState);
     if (resolvedCleanMode !== currentState.activity.cleanMode) {
       this.handlers.syncCleanModeFromDevice(decodedCleanMode);
     }

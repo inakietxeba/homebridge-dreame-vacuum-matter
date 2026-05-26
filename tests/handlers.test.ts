@@ -90,6 +90,27 @@ describe('MatterCommandHandlers', () => {
     });
   });
 
+  describe('handleLocateCommand', () => {
+    it('should send LOCATE action', async () => {
+      await handlers.handleLocateCommand();
+      expect(cloud.action).toHaveBeenCalledWith('dev-1', MIOT.LOCATE.siid, MIOT.ACTION.LOCATE);
+    });
+
+    it('should not throw when locate is unsupported', async () => {
+      cloud.action.mockRejectedValueOnce(new Error('unsupported'));
+
+      await expect(handlers.handleLocateCommand()).resolves.not.toThrow();
+      expect(log.warn).toHaveBeenCalledWith(expect.stringContaining('unsupported'));
+    });
+
+    it('should warn when Dreame returns a non-zero locate code', async () => {
+      cloud.action.mockResolvedValueOnce({ did: 'dev-1', siid: MIOT.LOCATE.siid, code: -1 });
+
+      await expect(handlers.handleLocateCommand()).resolves.not.toThrow();
+      expect(log.warn).toHaveBeenCalledWith(expect.stringContaining('Dreame code -1'));
+    });
+  });
+
   describe('handleCleaningMode', () => {
     it('should set mode via cloud properties', async () => {
       await handlers.handleCleaningMode('MOP');

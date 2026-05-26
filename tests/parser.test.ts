@@ -73,6 +73,22 @@ describe('StateParser', () => {
     expect(result.activity.cleanMode).toBe('SWEEP');
   });
 
+  it('should infer clean mode from Dreame cleaning state when mode property is model-specific', () => {
+    const parser = new StateParser(logger);
+    const state = createInitialState(identity);
+    state.activity.cleanMode = 'SWEEP_AND_MOP';
+
+    const result = parser.processProperties(
+      [
+        { siid: 4, piid: 23, value: 5120 },
+        { siid: 2, piid: 1, value: 7 },
+      ],
+      state,
+    );
+
+    expect(result.activity.cleanMode).toBe('MOP');
+  });
+
   it('should parse error code', () => {
     const parser = new StateParser(logger);
     const state = createInitialState(identity);

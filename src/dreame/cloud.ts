@@ -1,5 +1,5 @@
 import * as crypto from 'crypto';
-import { Logger } from '../util/logger';
+import { Logger } from '../util/logger.js';
 
 const API_HOST_SUFFIX = '.iot.dreame.tech';
 const API_PORT = '13267';
@@ -12,6 +12,7 @@ const DREAME_RLC = '1c80b3787b2266776bcdc481f37d8fa42ba10a30af81a6df-1';
 const PATH_LOGIN = '/dreame-auth/oauth/token';
 const PATH_DEVICE_LIST = '/dreame-user-iot/iotuserbind/device/listV2';
 const PATH_DEVICE_INFO = '/dreame-user-iot/iotuserbind/device/info';
+const REQUEST_TIMEOUT_MS = 30_000;
 
 export interface DreameDevice {
   did: string;
@@ -36,7 +37,8 @@ export class DreameCloud {
   private refreshToken: string | null = null;
   private tokenExpireTime = 0;
   private tenantId: string = DEFAULT_TENANT_ID;
-  private host: string | null = null;
+  private readonly deviceHosts = new Map<string, string>();
+  private readonly deviceFirmware = new Map<string, string>();
   private failCount = 0;
   private _connected = false;
   private _username: string | null = null;
@@ -84,7 +86,7 @@ export class DreameCloud {
     const headers = this.buildAuthHeaders();
     headers['Content-Type'] = 'application/x-www-form-urlencoded';
 
-    const res = await fetch(this.getApiUrl() + PATH_LOGIN, {
+    const res = await this.fetchWithTimeout(this.getApiUrl() + PATH_LOGIN, {
       method: 'POST',
       headers,
       body,
@@ -120,7 +122,7 @@ export class DreameCloud {
     const headers = this.buildAuthHeaders();
     headers['Content-Type'] = 'application/x-www-form-urlencoded';
 
-    const res = await fetch(this.getApiUrl() + PATH_LOGIN, { method: 'POST', headers, body });
+    const res = await this.fetchWithTimeout(this.getApiUrl() + PATH_LOGIN, { method: 'POST', headers, body });
     if (res.status !== 200) {
       this.refreshToken = null;
       throw new Error('Refresh token expired');
@@ -202,12 +204,12 @@ export class DreameCloud {
         const fetchOptions: RequestInit = { method: 'POST', headers };
         if (data !== undefined) fetchOptions.body = JSON.stringify(data);
 
-        const res = await fetch(url, fetchOptions);
+        const res = await this.fetchWithTimeout(url, fetchOptions);
 
         if (res.status === 401) {
           if (this.refreshToken) {
             this.log.warn('Token expired, refreshing...');
-            await this.refreshLogin();
+            await this.performTokenRefresh();
             continue;
           }
           throw new Error('HTTP 401: Token expired and no refresh token available');
@@ -262,22 +264,27 @@ export class DreameCloud {
     const data = response['data'] as Record<string, unknown> | undefined;
     if (!data || response['code'] !== 0) return null;
 
-    this.host = (data['bindDomain'] as string) ?? null;
+    const bindDomain = data['bindDomain'];
+    if (typeof bindDomain === 'string' && bindDomain.length > 0) {
+      this.deviceHosts.set(deviceId, bindDomain);
+    }
 
     // Extract firmware version from various possible fields
-    this.lastDeviceFirmware = (data['mcuVersion'] as string)
-      ?? (data['featureVersion'] as string)
-      ?? (data['firmwareVersion'] as string)
-      ?? null;
+    const firmware = this.firstString(data['mcuVersion'], data['featureVersion'], data['firmwareVersion']);
+    if (firmware) {
+      this.deviceFirmware.set(deviceId, firmware);
+    }
 
     return data;
   }
 
-  /** Firmware version from the last getDeviceInfo call. */
-  public lastDeviceFirmware: string | null = null;
+  getDeviceFirmware(deviceId: string): string | null {
+    return this.deviceFirmware.get(deviceId) ?? null;
+  }
 
   async sendCommand(deviceId: string, method: string, params: unknown): Promise<unknown> {
-    const hostPrefix = this.host ? `-${this.host.split('.')[0]!}` : '';
+    const host = this.deviceHosts.get(deviceId);
+    const hostPrefix = host ? `-${host.split('.')[0]!}` : '';
     const path = `/dreame-iot-com${hostPrefix}/device/sendCommand`;
     const id = Math.floor(Math.random() * 100_000);
 
@@ -307,5 +314,30 @@ export class DreameCloud {
       aiid,
       in: params,
     });
+  }
+
+  private firstString(...values: unknown[]): string | null {
+    for (const value of values) {
+      if (typeof value === 'string' && value.length > 0) {
+        return value;
+      }
+    }
+    return null;
+  }
+
+  private async fetchWithTimeout(url: string, init: RequestInit): Promise<Response> {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+
+    try {
+      return await fetch(url, { ...init, signal: controller.signal });
+    } catch (err: unknown) {
+      if (err instanceof Error && err.name === 'AbortError') {
+        throw new Error(`Dreame Cloud request timed out after ${REQUEST_TIMEOUT_MS / 1000}s`);
+      }
+      throw err;
+    } finally {
+      clearTimeout(timeout);
+    }
   }
 }

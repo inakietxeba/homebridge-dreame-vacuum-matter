@@ -10,17 +10,20 @@
         "title": "Name",
         "type": "string",
         "default": "Dreame Vacuum",
-        "required": true
+        "required": true,
+        "description": "Display name used by Homebridge."
       },
       "username": {
         "title": "Dreame Account Email",
         "type": "string",
+        "format": "email",
         "required": true,
         "description": "Your Dreame / Dreamehome app email. Can also be set via DREAME_EMAIL env var."
       },
       "password": {
         "title": "Dreame Account Password",
         "type": "string",
+        "format": "password",
         "required": true,
         "description": "Your Dreame / Dreamehome app password. Can also be set via DREAME_PASSWORD env var."
       },
