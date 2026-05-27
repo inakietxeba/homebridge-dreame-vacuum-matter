@@ -11,8 +11,9 @@ import { createInitialState, Identity, NormalizedState, POLL_PROPERTIES } from '
 import { getMatterApi, buildMatterAccessory, reattachHandlers, registerNewMatterAccessory, updateCachedMatterAccessory, cleanupStaleAccessories } from './registration.js';
 import {
   AUTOMATION_CONTACT_SENSORS_CONTEXT_KIND,
+  AUTOMATION_SENSOR_DEFINITIONS,
   AutomationContactSensors,
-  LEGACY_AUTOMATION_SWITCH_CONTEXT_KIND,
+  SensorKey,
 } from './homekit/automation-sensors.js';
 
 export class DreameVacuumMatterPlatform implements DynamicPlatformPlugin {
@@ -136,10 +137,11 @@ export class DreameVacuumMatterPlatform implements DynamicPlatformPlugin {
       const deviceModel = device.model;
       const deviceName = device.name || deviceModel;
       const uuid = matter.uuid.generate(deviceId);
-      const automationSensorsUuid = this.api.hap.uuid.generate(`${deviceId}:automation-contact-sensors`);
       this.activeAccessoryUuids.add(uuid);
       if (this.config.automationContactSensors) {
-        this.activeHapAccessoryUuids.add(automationSensorsUuid);
+        for (const definition of AUTOMATION_SENSOR_DEFINITIONS) {
+          this.activeHapAccessoryUuids.add(this.getAutomationSensorUuid(deviceId, definition.key));
+        }
       }
 
       // Get device info (sets host for sendCommand routing)
@@ -197,7 +199,7 @@ export class DreameVacuumMatterPlatform implements DynamicPlatformPlugin {
       if (!setupResult.configured) continue;
 
       const automationSensors = this.config.automationContactSensors
-        ? this.setupAutomationSensors(automationSensorsUuid, deviceName, deviceId, deviceModel, initialState)
+        ? this.setupAutomationSensors(deviceName, deviceId, deviceModel, initialState)
         : undefined;
 
       // Create accessory handler for state push
@@ -256,36 +258,46 @@ export class DreameVacuumMatterPlatform implements DynamicPlatformPlugin {
   }
 
   private setupAutomationSensors(
-    uuid: string,
     deviceName: string,
     deviceId: string,
     model: string,
     initialState: NormalizedState,
   ): AutomationContactSensors {
-    let accessory = this.accessories.find((cached) => cached.UUID === uuid);
+    const sensorAccessories = new Map<SensorKey, PlatformAccessory>();
 
-    if (!accessory) {
-      accessory = new this.api.platformAccessory(`${deviceName} Automation Sensors`, uuid);
-      accessory.category = this.api.hap.Categories.SENSOR;
-      this.api.registerPlatformAccessories(
-        'homebridge-dreame-vacuum-matter',
-        'DreameVacuumMatter',
-        [accessory],
-      );
-      this.accessories.push(accessory);
-      this.log.info(`Registered automation contact sensors: ${deviceName}`);
+    for (const definition of AUTOMATION_SENSOR_DEFINITIONS) {
+      const uuid = this.getAutomationSensorUuid(deviceId, definition.key);
+      const name = `${deviceName} ${definition.displaySuffix}`;
+      let accessory = this.accessories.find((cached) => cached.UUID === uuid);
+
+      if (!accessory) {
+        accessory = new this.api.platformAccessory(name, uuid);
+        accessory.category = this.api.hap.Categories.SENSOR;
+        this.api.registerPlatformAccessories(
+          'homebridge-dreame-vacuum-matter',
+          'DreameVacuumMatter',
+          [accessory],
+        );
+        this.accessories.push(accessory);
+        this.log.info(`Registered automation contact sensor: ${name}`);
+      }
+
+      sensorAccessories.set(definition.key, accessory);
     }
 
-    const automationSensors = new AutomationContactSensors(this.api, accessory, this.log, deviceName, deviceId, model);
+    const automationSensors = new AutomationContactSensors(this.api, sensorAccessories, this.log, deviceName, deviceId, model);
     automationSensors.updateState(initialState);
-    this.automationSensors.set(uuid, automationSensors);
+    this.automationSensors.set(deviceId, automationSensors);
     return automationSensors;
+  }
+
+  private getAutomationSensorUuid(deviceId: string, key: SensorKey): string {
+    return this.api.hap.uuid.generate(`${deviceId}:automation-contact-sensor:${key}`);
   }
 
   private cleanupStaleHapAccessories(): void {
     const stale = this.accessories.filter((accessory) =>
-      (accessory.context.kind === AUTOMATION_CONTACT_SENSORS_CONTEXT_KIND
-        || accessory.context.kind === LEGACY_AUTOMATION_SWITCH_CONTEXT_KIND)
+      accessory.context.kind === AUTOMATION_CONTACT_SENSORS_CONTEXT_KIND
       && !this.activeHapAccessoryUuids.has(accessory.UUID),
     );
 
@@ -300,7 +312,6 @@ export class DreameVacuumMatterPlatform implements DynamicPlatformPlugin {
     for (const accessory of stale) {
       const index = this.accessories.indexOf(accessory);
       if (index >= 0) this.accessories.splice(index, 1);
-      this.automationSensors.delete(accessory.UUID);
     }
   }
 
@@ -344,5 +355,6 @@ export class DreameVacuumMatterPlatform implements DynamicPlatformPlugin {
     this.deviceSessions.clear();
     this.accessoryHandlers.clear();
     this.commandHandlers.clear();
+    this.automationSensors.clear();
   }
 }

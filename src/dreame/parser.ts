@@ -76,10 +76,9 @@ export class StateParser {
       }
       case 2: { // Error code
         const errorCode = value as number;
-        if (errorCode !== 0) {
+        if (errorCode !== 0 && state.activity.runMode === 'error') {
           state.activity.activeError = `Error ${errorCode}`;
           state.activity.activeErrorCode = errorCode;
-          state.activity.runMode = 'error';
         } else {
           state.activity.activeError = null;
           state.activity.activeErrorCode = undefined;

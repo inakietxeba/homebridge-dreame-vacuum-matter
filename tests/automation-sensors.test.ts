@@ -32,28 +32,42 @@ function createApi() {
   } as any;
 }
 
-function createAccessory(infoService: ReturnType<typeof createService>) {
-  const services = new Map<string, ReturnType<typeof createService>>();
-  return {
+function createAccessory() {
+  const contactService = createService();
+  const infoService = createService();
+  const accessory = {
     context: {},
-    services,
     getService: vi.fn((serviceType: string) => serviceType === 'AccessoryInformation' ? infoService : undefined),
-    getServiceById: vi.fn((_serviceType: string, subtype: string) => services.get(subtype)),
-    addService: vi.fn((_serviceType: string, _name: string, subtype: string) => {
-      const service = createService();
-      services.set(subtype, service);
-      return service;
-    }),
+    addService: vi.fn(() => contactService),
   } as any;
+  return { accessory, contactService, infoService };
+}
+
+function createAccessories() {
+  const entries = {
+    idle: createAccessory(),
+    busy: createAccessory(),
+    cleaning: createAccessory(),
+    error: createAccessory(),
+  };
+
+  return {
+    entries,
+    map: new Map([
+      ['idle', entries.idle.accessory],
+      ['busy', entries.busy.accessory],
+      ['cleaning', entries.cleaning.accessory],
+      ['error', entries.error.accessory],
+    ]),
+  };
 }
 
 describe('AutomationContactSensors', () => {
   it('should expose idle as detected only when the robot is truly idle', () => {
-    const infoService = createService();
-    const accessory = createAccessory(infoService);
+    const { entries, map } = createAccessories();
     const sensors = new AutomationContactSensors(
       createApi(),
-      accessory,
+      map as any,
       { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() } as any,
       'Falete',
       'dev-1',
@@ -65,9 +79,9 @@ describe('AutomationContactSensors', () => {
     sensors.updateState(idleState);
 
     expect(sensors.getValue('idle')).toBe(true);
-    expect(accessory.services.get('idle-state')?.updateCharacteristic).toHaveBeenLastCalledWith(
+    expect(entries.idle.contactService.updateCharacteristic).toHaveBeenLastCalledWith(
       { CONTACT_DETECTED: 0, CONTACT_NOT_DETECTED: 1 },
-      0,
+      1,
     );
 
     const maintenanceState = createInitialState(identity);
@@ -76,18 +90,17 @@ describe('AutomationContactSensors', () => {
 
     expect(sensors.getValue('idle')).toBe(false);
     expect(sensors.getValue('busy')).toBe(true);
-    expect(accessory.services.get('idle-state')?.updateCharacteristic).toHaveBeenLastCalledWith(
+    expect(entries.idle.contactService.updateCharacteristic).toHaveBeenLastCalledWith(
       { CONTACT_DETECTED: 0, CONTACT_NOT_DETECTED: 1 },
-      1,
+      0,
     );
   });
 
   it('should expose cleaning and error contact sensors', () => {
-    const infoService = createService();
-    const accessory = createAccessory(infoService);
+    const { entries, map } = createAccessories();
     const sensors = new AutomationContactSensors(
       createApi(),
-      accessory,
+      map as any,
       { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() } as any,
       'Falete',
       'dev-1',
@@ -100,6 +113,10 @@ describe('AutomationContactSensors', () => {
 
     expect(sensors.getValue('cleaning')).toBe(true);
     expect(sensors.getValue('busy')).toBe(true);
+    expect(entries.cleaning.contactService.updateCharacteristic).toHaveBeenLastCalledWith(
+      { CONTACT_DETECTED: 0, CONTACT_NOT_DETECTED: 1 },
+      1,
+    );
 
     const errorState = createInitialState(identity);
     errorState.activity.runMode = 'error';
@@ -108,5 +125,54 @@ describe('AutomationContactSensors', () => {
 
     expect(sensors.getValue('cleaning')).toBe(false);
     expect(sensors.getValue('error')).toBe(true);
+    expect(entries.error.contactService.updateCharacteristic).toHaveBeenLastCalledWith(
+      { CONTACT_DETECTED: 0, CONTACT_NOT_DETECTED: 1 },
+      1,
+    );
+  });
+
+  it('should publish inactive initial values as contact detected', () => {
+    const { entries, map } = createAccessories();
+    const sensors = new AutomationContactSensors(
+      createApi(),
+      map as any,
+      { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() } as any,
+      'Falete',
+      'dev-1',
+      'dreame.vacuum.test',
+    );
+
+    const idleState = createInitialState(identity);
+    idleState.activity.runMode = 'idle';
+    sensors.updateState(idleState);
+
+    expect(sensors.getValue('cleaning')).toBe(false);
+    expect(sensors.getValue('error')).toBe(false);
+    expect(entries.cleaning.contactService.updateCharacteristic).toHaveBeenLastCalledWith(
+      { CONTACT_DETECTED: 0, CONTACT_NOT_DETECTED: 1 },
+      0,
+    );
+    expect(entries.error.contactService.updateCharacteristic).toHaveBeenLastCalledWith(
+      { CONTACT_DETECTED: 0, CONTACT_NOT_DETECTED: 1 },
+      0,
+    );
+  });
+
+  it('should name each contact sensor service with its state', () => {
+    const { entries, map } = createAccessories();
+
+    new AutomationContactSensors(
+      createApi(),
+      map as any,
+      { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() } as any,
+      'Falete',
+      'dev-1',
+      'dreame.vacuum.test',
+    );
+
+    expect(entries.idle.contactService.setCharacteristic).toHaveBeenCalledWith('Name', 'Falete Idle');
+    expect(entries.busy.contactService.setCharacteristic).toHaveBeenCalledWith('Name', 'Falete Busy');
+    expect(entries.cleaning.contactService.setCharacteristic).toHaveBeenCalledWith('Name', 'Falete Cleaning');
+    expect(entries.error.contactService.setCharacteristic).toHaveBeenCalledWith('Name', 'Falete Error');
   });
 });

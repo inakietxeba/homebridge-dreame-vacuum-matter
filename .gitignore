@@ -5,3 +5,4 @@ coverage/
 .env
 homebridge.log*
 homebridge-dreame-vacuum-matter-1.0.0.tgz
+.DS_Store

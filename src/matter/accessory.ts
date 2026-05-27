@@ -42,6 +42,7 @@ export class DreameVacuumAccessory {
   private syncInFlight = false;
   private pendingSync = false;
   private syncRetryTimer: ReturnType<typeof setTimeout> | undefined;
+  private registrationSyncTimer: ReturnType<typeof setTimeout> | undefined;
   private syncRetryDelayMs = 2000;
   private syncRetryAttempts = 0;
   private syncDebounceTimer: ReturnType<typeof setTimeout> | undefined;
@@ -53,7 +54,8 @@ export class DreameVacuumAccessory {
   private readonly unsupportedClustersLogged = new Set<string>();
 
   private static readonly SYNC_DEBOUNCE_MS = 100;
-  private static readonly PERIODIC_SYNC_INTERVAL_MS = 60_000;
+  private static readonly INITIAL_REGISTRATION_SYNC_DELAY_MS = 5_000;
+  private static readonly PERIODIC_SYNC_INTERVAL_MS = 300_000;
   private static readonly PER_CLUSTER_PUSH_TIMEOUT_MS = 3_000;
   private static readonly SESSION_ERROR_THRESHOLD = 3;
   private static readonly SESSION_RECOVERY_DELAY_MS = 60_000;
@@ -74,7 +76,10 @@ export class DreameVacuumAccessory {
     if (this.isRegistered) return;
     this.isRegistered = true;
     this.platformLogger.debug(`Matter accessory ${this.uuid} marked registered`);
-    this.requestSync();
+    this.registrationSyncTimer = setTimeout(() => {
+      this.registrationSyncTimer = undefined;
+      this.requestSync();
+    }, DreameVacuumAccessory.INITIAL_REGISTRATION_SYNC_DELAY_MS);
 
     // Start periodic sync to recover from dropped Matter updates
     if (!this.periodicSyncTimer) {
@@ -297,8 +302,14 @@ export class DreameVacuumAccessory {
 
   public dispose(): void {
     if (this.syncRetryTimer) clearTimeout(this.syncRetryTimer);
+    if (this.registrationSyncTimer) clearTimeout(this.registrationSyncTimer);
     if (this.syncDebounceTimer) clearTimeout(this.syncDebounceTimer);
     if (this.periodicSyncTimer) clearInterval(this.periodicSyncTimer);
     if (this.sessionRecoveryTimer) clearTimeout(this.sessionRecoveryTimer);
+    this.syncRetryTimer = undefined;
+    this.registrationSyncTimer = undefined;
+    this.syncDebounceTimer = undefined;
+    this.periodicSyncTimer = undefined;
+    this.sessionRecoveryTimer = undefined;
   }
 }

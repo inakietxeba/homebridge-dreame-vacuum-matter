@@ -92,6 +92,7 @@ describe('StateParser', () => {
   it('should parse error code', () => {
     const parser = new StateParser(logger);
     const state = createInitialState(identity);
+    state.activity.runMode = 'error';
     const result = parser.processProperties(
       [{ siid: 2, piid: 2, value: 5 }],
       state,
@@ -99,6 +100,22 @@ describe('StateParser', () => {
     expect(result.activity.activeError).toBe('Error 5');
     expect(result.activity.activeErrorCode).toBe(5);
     expect(result.activity.runMode).toBe('error');
+  });
+
+  it('should ignore stale error code while the robot reports mop maintenance', () => {
+    const parser = new StateParser(logger);
+    const state = createInitialState(identity);
+    const result = parser.processProperties(
+      [
+        { siid: 2, piid: 1, value: 8 },
+        { siid: 2, piid: 2, value: 68 },
+      ],
+      state,
+    );
+    expect(result.activity.runMode).toBe('maintenance');
+    expect(result.activity.maintenanceType).toBe('cleaning_mop');
+    expect(result.activity.activeError).toBeNull();
+    expect(result.activity.activeErrorCode).toBeUndefined();
   });
 
   it('should clear error on code 0', () => {

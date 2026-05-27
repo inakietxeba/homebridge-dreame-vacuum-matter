@@ -45,7 +45,7 @@
         "title": "Expose Automation Contact Sensors",
         "type": "boolean",
         "default": false,
-        "description": "Expose optional HomeKit contact sensors for automations: Idle, Busy, Cleaning, and Error. Disabled by default."
+        "description": "Expose optional HomeKit contact sensors for automations: Idle, Busy, Cleaning, and Error. Disabled by default; disabling later removes these sensors."
       }
     }
   }

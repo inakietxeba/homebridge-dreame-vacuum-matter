@@ -28,6 +28,10 @@ function createMockLogger() {
   return { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() } as any;
 }
 
+async function drainInitialRegistrationSync(): Promise<void> {
+  await vi.advanceTimersByTimeAsync(5_100);
+}
+
 describe('DreameVacuumAccessory', () => {
   beforeEach(() => {
     vi.useFakeTimers();
@@ -47,7 +51,7 @@ describe('DreameVacuumAccessory', () => {
       accessory.markRegistered();
 
       // Drain the initial sync from markRegistered
-      vi.advanceTimersByTime(100);
+      vi.advanceTimersByTime(5_100);
       updateFn.mockClear();
 
       const newState = createInitialState(identity);
@@ -65,7 +69,7 @@ describe('DreameVacuumAccessory', () => {
         createMockLogger(), 'test-uuid-123', createInitialState(identity), api,
       );
       accessory.markRegistered();
-      vi.advanceTimersByTime(100);
+      await drainInitialRegistrationSync();
       await vi.waitFor(() => expect(updateFn).toHaveBeenCalled());
       updateFn.mockClear();
 
@@ -84,7 +88,7 @@ describe('DreameVacuumAccessory', () => {
         createMockLogger(), 'test-uuid-123', createInitialState(identity), api,
       );
       accessory.markRegistered();
-      vi.advanceTimersByTime(100);
+      await drainInitialRegistrationSync();
       await vi.waitFor(() => expect(updateFn).toHaveBeenCalled());
       updateFn.mockClear();
 
@@ -106,7 +110,7 @@ describe('DreameVacuumAccessory', () => {
   });
 
   describe('periodic sync', () => {
-    it('should re-push state every 60s even if unchanged', async () => {
+    it('should re-push state every 5 minutes even if unchanged', async () => {
       const updateFn = vi.fn().mockResolvedValue(undefined);
       const api = createMockApi(updateFn);
       const accessory = new DreameVacuumAccessory(
@@ -115,13 +119,13 @@ describe('DreameVacuumAccessory', () => {
       accessory.markRegistered();
 
       // Drain initial sync
-      await vi.advanceTimersByTimeAsync(100);
+      await drainInitialRegistrationSync();
       const initialCallCount = updateFn.mock.calls.length;
       expect(initialCallCount).toBeGreaterThan(0);
 
-      // Advance 60s — periodic sync clears dedup cache and re-pushes
-      // periodic timer fires at 60s, then debounce at +100ms
-      await vi.advanceTimersByTimeAsync(60_100);
+      // Advance 5 minutes — periodic sync clears dedup cache and re-pushes
+      // periodic timer fires at 5 minutes, then debounce at +100ms
+      await vi.advanceTimersByTimeAsync(300_100);
       expect(updateFn.mock.calls.length).toBeGreaterThan(initialCallCount);
     });
   });
@@ -138,7 +142,7 @@ describe('DreameVacuumAccessory', () => {
       );
       accessory.markRegistered();
 
-      vi.advanceTimersByTime(100);
+      await drainInitialRegistrationSync();
       await vi.waitFor(() => expect(updateFn).toHaveBeenCalled());
 
       // Should have pushed multiple clusters
@@ -160,7 +164,7 @@ describe('DreameVacuumAccessory', () => {
       accessory.markRegistered();
 
       // Advance past debounce + timeout
-      vi.advanceTimersByTime(100);
+      vi.advanceTimersByTime(5_100);
       vi.advanceTimersByTime(3_000);
 
       // Should not crash — other clusters should still have been attempted
@@ -180,7 +184,7 @@ describe('DreameVacuumAccessory', () => {
 
       // Transient session errors now use a short backoff, adapted from the
       // Eufy plugin, before the circuit breaker pauses pushes.
-      await vi.advanceTimersByTimeAsync(100);
+      await drainInitialRegistrationSync();
       await vi.advanceTimersByTimeAsync(30_100);
       await vi.advanceTimersByTimeAsync(30_100);
 
