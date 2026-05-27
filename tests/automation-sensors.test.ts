@@ -69,7 +69,7 @@ describe('AutomationContactSensors', () => {
       createApi(),
       map as any,
       { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() } as any,
-      'Falete',
+      'Robot',
       'dev-1',
       'dreame.vacuum.test',
     );
@@ -102,7 +102,7 @@ describe('AutomationContactSensors', () => {
       createApi(),
       map as any,
       { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() } as any,
-      'Falete',
+      'Robot',
       'dev-1',
       'dreame.vacuum.test',
     );
@@ -137,7 +137,7 @@ describe('AutomationContactSensors', () => {
       createApi(),
       map as any,
       { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() } as any,
-      'Falete',
+      'Robot',
       'dev-1',
       'dreame.vacuum.test',
     );
@@ -165,14 +165,14 @@ describe('AutomationContactSensors', () => {
       createApi(),
       map as any,
       { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() } as any,
-      'Falete',
+      'Robot',
       'dev-1',
       'dreame.vacuum.test',
     );
 
-    expect(entries.idle.contactService.setCharacteristic).toHaveBeenCalledWith('Name', 'Falete Idle');
-    expect(entries.busy.contactService.setCharacteristic).toHaveBeenCalledWith('Name', 'Falete Busy');
-    expect(entries.cleaning.contactService.setCharacteristic).toHaveBeenCalledWith('Name', 'Falete Cleaning');
-    expect(entries.error.contactService.setCharacteristic).toHaveBeenCalledWith('Name', 'Falete Error');
+    expect(entries.idle.contactService.setCharacteristic).toHaveBeenCalledWith('Name', 'Robot Idle');
+    expect(entries.busy.contactService.setCharacteristic).toHaveBeenCalledWith('Name', 'Robot Busy');
+    expect(entries.cleaning.contactService.setCharacteristic).toHaveBeenCalledWith('Name', 'Robot Cleaning');
+    expect(entries.error.contactService.setCharacteristic).toHaveBeenCalledWith('Name', 'Robot Error');
   });
 });
