@@ -57,6 +57,28 @@ Or search for `homebridge-dreame-vacuum-matter` in the Homebridge UI.
 | `password` | — | Dreame/Dreamehome app password. Overridable via `DREAME_PASSWORD` env var |
 | `country` | `eu` | Cloud region: `cn`, `eu`, `us`, `sg`, `kr`, `ru` |
 | `automationContactSensors` | `false` | Create HomeKit contact sensors for Apple Home automations. Disabling later removes these sensors |
+| `mapOverrides` | `[]` | Replace discovered floor/map and room names, optionally scoped by device ID |
+
+Room names can be overridden using the segment and map IDs printed in debug logs:
+
+```json
+"mapOverrides": [
+  {
+    "mapId": 10,
+    "name": "Ático",
+    "rooms": [
+      {
+        "segmentId": "3",
+        "name": "Cocina"
+      },
+      {
+        "segmentId": "1",
+        "name": "Despacho"
+      }
+    ]
+  }
+]
+```
 
 ## Privacy
 
@@ -68,7 +90,7 @@ This plugin does not collect analytics, telemetry, usage metrics, or tracking da
 - **Matter API is unavailable**: verify you are running Homebridge v2 with Matter enabled.
 - **Login failed**: check the account email, password, and region. If credentials are set via environment variables, `DREAME_EMAIL` and `DREAME_PASSWORD` override the Homebridge UI values.
 - **MQTT unavailable**: the plugin automatically falls back to HTTP polling if the device does not expose an MQTT endpoint.
-- **Rooms/areas are not shown**: Dreame's cloud endpoints used by this plugin do not currently expose a reliable room/map list, so Matter `ServiceArea` is intentionally disabled.
+- **Rooms/areas are not shown**: enable debug logging and check whether the Dreame cloud returned a map list and room segments for the robot.
 
 ## Architecture
 

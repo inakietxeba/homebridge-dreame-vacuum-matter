@@ -110,6 +110,12 @@ export class DreameVacuumAccessory {
     this.requestSync();
   }
 
+  public applyUserRoomSelection(roomIds: string[]): void {
+    if (isDeepStrictEqual(this.currentState.activity.selectedRooms, roomIds)) return;
+    this.currentState.activity.selectedRooms = [...roomIds];
+    this.requestSync();
+  }
+
   /**
    * Request a debounced state sync to Matter. Coalesces rapid updates
    * (e.g. multiple MQTT properties arriving within 100ms) into a single push.
@@ -148,9 +154,6 @@ export class DreameVacuumAccessory {
       }
 
       const matterState = MatterClusterMapper.toMatterState(this.currentState);
-
-      // ServiceArea not supported for Dreame devices
-      delete matterState.ServiceArea;
 
       if (this.lastSyncedMatterState && isDeepStrictEqual(matterState, this.lastSyncedMatterState)) {
         return;
@@ -219,6 +222,31 @@ export class DreameVacuumAccessory {
 
       // Process results
       const anySucceeded = results.some((r) => r.kind === 'pushed');
+      if (anySucceeded) {
+        this.platformLogger.debug(`Matter state sent for ${this.uuid}: ${JSON.stringify({
+          RvcRunMode: {
+            currentMode: matterState.RvcRunMode.currentMode,
+          },
+          RvcCleanMode: {
+            currentMode: matterState.RvcCleanMode.currentMode,
+          },
+          RvcOperationalState: {
+            operationalState: matterState.RvcOperationalState.operationalState,
+            operationalError: matterState.RvcOperationalState.operationalError,
+          },
+          ServiceArea: matterState.ServiceArea
+            ? {
+              selectedAreas: matterState.ServiceArea.selectedAreas,
+              currentArea: matterState.ServiceArea.currentArea,
+            }
+            : undefined,
+          PowerSource: {
+            batPercentRemaining: matterState.PowerSource.batPercentRemaining,
+            batChargeLevel: matterState.PowerSource.batChargeLevel,
+            batChargeState: matterState.PowerSource.batChargeState,
+          },
+        })}`);
+      }
       const shouldRetryRegistration = results.some((r) => r.kind === 'retry');
       if (shouldRetryRegistration) {
         this.syncRetryAttempts += 1;

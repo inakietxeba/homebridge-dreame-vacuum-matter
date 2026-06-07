@@ -4,6 +4,12 @@ import { MatterClusterMapper } from '../src/matter/clusters';
 import { createInitialState } from '../src/dreame/models';
 
 describe('MatterMappers', () => {
+  it('should use the Matter PowerSource charge-state enum values', () => {
+    expect(MatterMappers.mapChargeState({ batteryPercent: 50, charging: true, docked: true })).toBe(1);
+    expect(MatterMappers.mapChargeState({ batteryPercent: 100, charging: false, docked: true })).toBe(2);
+    expect(MatterMappers.mapChargeState({ batteryPercent: 50, charging: false, docked: true })).toBe(3);
+  });
+
   const identity = { deviceId: 'test-123', model: 'dreame.vacuum.test', firmware: '1.0' };
 
   it('should map idle state to DOCKED when docked', () => {
@@ -29,6 +35,38 @@ describe('MatterMappers', () => {
     expect(result).toBe(0x01); // RUNNING
   });
 
+  it('should keep active maintenance in cleaning run mode', () => {
+    const state = createInitialState(identity);
+    state.activity.runMode = 'maintenance';
+    state.activity.maintenanceType = 'cleaning_mop';
+
+    expect(MatterMappers.mapRvcRunMode(state)).toBe(1); // CLEANING
+    expect(MatterMappers.mapOperationalState(state)).toBe(0x44); // CLEANING_MOP
+  });
+
+  it('should expose passive mop drying as idle and docked', () => {
+    const state = createInitialState(identity);
+    state.activity.rawDeviceState = 8;
+    state.activity.runMode = 'maintenance';
+    state.activity.maintenanceType = 'cleaning_mop';
+    state.power.docked = true;
+    state.power.charging = true;
+
+    expect(MatterMappers.mapRvcRunMode(state)).toBe(0); // IDLE
+    expect(MatterMappers.mapOperationalState(state)).toBe(0x42); // DOCKED
+    expect(MatterMappers.mapChargeState(state.power)).toBe(1); // IS_CHARGING
+  });
+
+  it('should keep active mop washing as cleaning mop', () => {
+    const state = createInitialState(identity);
+    state.activity.rawDeviceState = 9;
+    state.activity.runMode = 'maintenance';
+    state.activity.maintenanceType = 'cleaning_mop';
+
+    expect(MatterMappers.mapRvcRunMode(state)).toBe(1); // CLEANING
+    expect(MatterMappers.mapOperationalState(state)).toBe(0x44); // CLEANING_MOP
+  });
+
   it('should map returning to SEEKING_CHARGER', () => {
     const state = createInitialState(identity);
     state.activity.runMode = 'returning';
@@ -50,6 +88,19 @@ describe('MatterMappers', () => {
     expect(result).toBe(0x03); // ERROR
   });
 
+  it('should map Dreame-specific states to standard Matter states', () => {
+    const state = createInitialState(identity);
+    state.activity.rawDeviceState = 29;
+    state.activity.runMode = 'idle';
+    state.power.docked = true;
+    state.power.charging = true;
+
+    expect(MatterMappers.mapOperationalState(state)).toBe(0x42); // DOCKED
+    expect(MatterMappers.getOperationalStateList()).not.toContainEqual(
+      expect.objectContaining({ operationalStateId: 0x80 + 29 }),
+    );
+  });
+
   it('should map battery level to Matter format (x2)', () => {
     expect(MatterMappers.mapBatteryLevel(50)).toBe(100);
     expect(MatterMappers.mapBatteryLevel(100)).toBe(200);
@@ -60,6 +111,14 @@ describe('MatterMappers', () => {
     expect(MatterMappers.mapRvcCleanMode('SWEEP')).toBe(0);
     expect(MatterMappers.mapRvcCleanMode('MOP')).toBe(1);
     expect(MatterMappers.mapRvcCleanMode('SWEEP_AND_MOP')).toBe(2);
+  });
+
+  it('should advertise combined cleaning as simultaneous vacuum and mop', () => {
+    expect(MatterMappers.getSupportedCleanModes()).toContainEqual({
+      label: 'Sweep and Mop',
+      mode: 2,
+      modeTags: [{ value: 0x4001 }, { value: 0x4002 }],
+    });
   });
 });
 

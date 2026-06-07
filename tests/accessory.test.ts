@@ -130,15 +130,71 @@ describe('DreameVacuumAccessory', () => {
     });
   });
 
+  describe('ServiceArea sync', () => {
+    it('should push selected areas to Matter', async () => {
+      const updateFn = vi.fn().mockResolvedValue(undefined);
+      const api = createMockApi(updateFn);
+      const state = createInitialState(identity);
+      state.activity.availableRooms = [{ id: '3', name: 'Kitchen' }];
+      const accessory = new DreameVacuumAccessory(
+        createMockLogger(), 'test-uuid-123', state, api,
+      );
+      accessory.markRegistered();
+      await drainInitialRegistrationSync();
+      updateFn.mockClear();
+
+      accessory.applyUserRoomSelection(['3']);
+      await vi.advanceTimersByTimeAsync(100);
+
+      expect(updateFn).toHaveBeenCalledWith(
+        'test-uuid-123',
+        'serviceArea',
+        expect.objectContaining({
+          selectedAreas: [3],
+          currentArea: null,
+        }),
+      );
+    });
+
+    it('should push current area while cleaning a selected room', async () => {
+      const updateFn = vi.fn().mockResolvedValue(undefined);
+      const api = createMockApi(updateFn);
+      const state = createInitialState(identity);
+      state.activity.availableRooms = [{ id: '3', name: 'Kitchen' }];
+      state.activity.selectedRooms = ['3'];
+      const accessory = new DreameVacuumAccessory(
+        createMockLogger(), 'test-uuid-123', state, api,
+      );
+      accessory.markRegistered();
+      await drainInitialRegistrationSync();
+      updateFn.mockClear();
+
+      const cleaningState = structuredClone(state);
+      cleaningState.activity.runMode = 'cleaning';
+      accessory.onStateUpdate(cleaningState);
+      await vi.advanceTimersByTimeAsync(100);
+
+      expect(updateFn).toHaveBeenCalledWith(
+        'test-uuid-123',
+        'serviceArea',
+        expect.objectContaining({
+          selectedAreas: [3],
+          currentArea: 3,
+        }),
+      );
+    });
+  });
+
   describe('parallel cluster pushes', () => {
     it('should push all clusters in parallel', async () => {
       const callOrder: string[] = [];
+      const log = createMockLogger();
       const updateFn = vi.fn(async (_uuid: string, cluster: string) => {
         callOrder.push(cluster);
       });
       const api = createMockApi(updateFn);
       const accessory = new DreameVacuumAccessory(
-        createMockLogger(), 'test-uuid-123', createInitialState(identity), api,
+        log, 'test-uuid-123', createInitialState(identity), api,
       );
       accessory.markRegistered();
 
@@ -147,6 +203,7 @@ describe('DreameVacuumAccessory', () => {
 
       // Should have pushed multiple clusters
       expect(callOrder.length).toBeGreaterThanOrEqual(4);
+      expect(log.debug).toHaveBeenCalledWith(expect.stringContaining('Matter state sent'));
     });
 
     it('should handle per-cluster timeout gracefully', async () => {

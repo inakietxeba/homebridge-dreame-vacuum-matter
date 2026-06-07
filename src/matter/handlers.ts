@@ -1,13 +1,8 @@
 import { DreameCloud } from '../dreame/cloud.js';
 import { Logger } from '../util/logger.js';
 import { CleaningMode } from '../config.js';
-import { MIOT, SuctionLevel, WaterLevel } from '../dreame/models.js';
-
-const CLEANING_MODE_TO_VALUE: Record<CleaningMode, number> = {
-  SWEEP: 0,
-  MOP: 1,
-  SWEEP_AND_MOP: 2,
-};
+import { DREAME_STATUS, MIOT, SuctionLevel, WaterLevel } from '../dreame/models.js';
+import { DreameCleaningModeCodec } from '../dreame/cleaning-mode.js';
 
 class TemporalSuppression {
   private until = 0;
@@ -26,13 +21,16 @@ export class MatterCommandHandlers {
   private currentCleanMode: CleaningMode;
   private readonly modeSuppression = new TemporalSuppression();
   private onCleanModeSelected?: (mode: CleaningMode) => void;
+  private onRoomSelectionChanged?: (roomIds: string[]) => void;
   private pendingRoomIds: number[] | null = null;
+  private areaIdToRoomIdMap = new Map<number, string>();
 
   constructor(
     private cloud: DreameCloud | null,
     private readonly deviceId: string,
     private readonly log: Logger,
     defaultCleanMode: CleaningMode = 'SWEEP_AND_MOP',
+    private cleaningModeCodec = new DreameCleaningModeCodec(),
   ) {
     this.currentCleanMode = defaultCleanMode;
   }
@@ -42,6 +40,10 @@ export class MatterCommandHandlers {
     this.cloud = cloud;
   }
 
+  public setCleaningModeCodec(codec: DreameCleaningModeCodec): void {
+    this.cleaningModeCodec = codec;
+  }
+
   private requireCloud(): DreameCloud {
     if (!this.cloud) throw new Error('Cloud connection not available yet');
     return this.cloud;
@@ -49,6 +51,19 @@ export class MatterCommandHandlers {
 
   public setOnCleanModeSelected(callback: (mode: CleaningMode) => void): void {
     this.onCleanModeSelected = callback;
+  }
+
+  public setOnRoomSelectionChanged(callback: (roomIds: string[]) => void): void {
+    this.onRoomSelectionChanged = callback;
+  }
+
+  public setAreaIdToRoomIdMap(map: Map<number, string>): void {
+    this.areaIdToRoomIdMap = new Map(map);
+    this.log.debug(
+      this.areaIdToRoomIdMap.size > 0
+        ? `Matter ServiceArea mapping loaded: ${[...this.areaIdToRoomIdMap.entries()].map(([areaId, roomId]) => `${areaId}->${roomId}`).join(', ')}`
+        : 'Matter ServiceArea mapping cleared or empty',
+    );
   }
 
   public isCleanModeSuppressionActive(): boolean {
@@ -81,20 +96,46 @@ export class MatterCommandHandlers {
         this.getCurrentWaterLevel(),
         index + 1,
       ]);
-      await this.requireCloud().setProperties(this.deviceId, [
-        { did: this.deviceId, siid: MIOT.VACUUM.siid, piid: MIOT.VACUUM.CLEANING_PROPERTIES, value: JSON.stringify({ selects }) },
+      const payload = { selects };
+      this.log.debug(`Sending Dreame START_CUSTOM segment payload: ${JSON.stringify(payload)}`);
+      await this.requireCloud().action(this.deviceId, MIOT.VACUUM.siid, MIOT.ACTION.START_CUSTOM, [
+        { piid: MIOT.VACUUM.STATUS, value: DREAME_STATUS.SEGMENT_CLEANING },
+        {
+          piid: MIOT.VACUUM.CLEANING_PROPERTIES,
+          value: JSON.stringify(payload),
+        },
       ]);
       this.log.debug(`Room clean sent for rooms [${roomsToClean.join(', ')}]`);
+      return;
     }
 
     await this.requireCloud().action(this.deviceId, MIOT.VACUUM.siid, MIOT.ACTION.START);
-    // Clear pending rooms only after START succeeds
-    if (roomsToClean) this.pendingRoomIds = null;
     this.log.debug('START_CLEANING sent successfully');
+  }
+
+  public async handleAreaSelection(areaIds: number[]): Promise<void> {
+    this.log.debug(`Matter ServiceArea SelectAreas received: [${areaIds.join(', ')}]`);
+    const roomIds: number[] = [];
+    for (const areaId of areaIds) {
+      const roomId = this.areaIdToRoomIdMap.get(areaId) ?? String(areaId);
+      const segmentId = Number.parseInt(roomId, 10);
+      if (Number.isFinite(segmentId) && segmentId > 0) {
+        roomIds.push(segmentId);
+      } else {
+        this.log.warn(`Ignoring non-numeric Dreame room id "${roomId}" for Matter area ${areaId}`);
+      }
+    }
+    this.log.debug(`Resolved Matter ServiceArea selection to Dreame segment(s): [${roomIds.join(', ')}]`);
+    await this.handleRoomSelection(roomIds);
   }
 
   public async handleRoomSelection(roomIds: number[]): Promise<void> {
     this.pendingRoomIds = roomIds.length > 0 ? [...roomIds] : null;
+    try {
+      this.onRoomSelectionChanged?.(roomIds.map(String));
+    } catch (err: unknown) {
+      this.log.warn(`Failed to apply room selection to accessory state: ${err instanceof Error ? err.message : String(err)}`);
+    }
     this.log.debug(
       roomIds.length > 0
         ? `Room selection set for next start: [${roomIds.join(', ')}]`
@@ -188,8 +229,13 @@ export class MatterCommandHandlers {
   }
 
   private async setCleaningMode(mode: CleaningMode): Promise<void> {
+    const rawValue = this.cleaningModeCodec.encode(mode);
+    this.log.debug(
+      `Setting Dreame cleaning mode ${mode}: raw 4.23=${rawValue}`
+      + ` (${this.cleaningModeCodec.usesLiftingMopEncoding ? 'lifting-mop encoding' : 'standard encoding'})`,
+    );
     await this.requireCloud().setProperties(this.deviceId, [
-      { did: this.deviceId, siid: MIOT.VACUUM.siid, piid: MIOT.VACUUM.CLEAN_MODE, value: CLEANING_MODE_TO_VALUE[mode] },
+      { did: this.deviceId, siid: MIOT.VACUUM.siid, piid: MIOT.VACUUM.CLEAN_MODE, value: rawValue },
     ]);
   }
 

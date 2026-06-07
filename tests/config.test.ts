@@ -18,6 +18,7 @@ describe('Config', () => {
     expect(config.country).toBe('eu');
     expect(config.username).toBe('test@example.com');
     expect(config.password).toBe('secret');
+    expect(config.mapOverrides).toEqual([]);
 
     // Restore
     if (savedEmail) process.env['DREAME_EMAIL'] = savedEmail;
@@ -35,5 +36,35 @@ describe('Config', () => {
     expect(config.password).toBe('env-secret');
     delete process.env['DREAME_EMAIL'];
     delete process.env['DREAME_PASSWORD'];
+  });
+
+  it('should accept map and room name overrides', () => {
+    const config = parsePlatformConfig({
+      platform: 'DreameVacuumMatter',
+      name: 'Dreame',
+      mapOverrides: [
+        {
+          mapId: 10,
+          deviceId: 'robot-1',
+          name: 'Ático',
+          rooms: [
+            { segmentId: '3', name: 'Cocina' },
+            { segmentId: '1', name: 'Despacho' },
+          ],
+        },
+      ],
+    } as any);
+
+    expect(config.mapOverrides).toEqual([
+      {
+        mapId: 10,
+        deviceId: 'robot-1',
+        name: 'Ático',
+        rooms: [
+          { segmentId: '3', name: 'Cocina' },
+          { segmentId: '1', name: 'Despacho' },
+        ],
+      },
+    ]);
   });
 });

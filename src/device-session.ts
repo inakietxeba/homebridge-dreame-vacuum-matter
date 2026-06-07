@@ -51,7 +51,7 @@ export class DeviceSession {
 
     mqttClient.on('message', (properties) => {
       try {
-        this.processStateUpdate(properties);
+        this.processStateUpdate(properties, 'MQTT');
       } catch (err: unknown) {
         this.log.error(`Failed to process MQTT message for ${this.deviceName}: ${err instanceof Error ? err.message : String(err)}`);
       }
@@ -75,15 +75,19 @@ export class DeviceSession {
   }
 
   private getPollingInterval(): number {
-    const isCleaning = this.accessoryHandler.getCurrentState().activity.runMode === 'cleaning';
+    const runMode = this.accessoryHandler.getCurrentState().activity.runMode;
+    const isActive = runMode === 'cleaning'
+      || runMode === 'returning'
+      || runMode === 'maintenance'
+      || runMode === 'mapping';
 
     if (!this.mqttConnected) {
-      // No MQTT: poll aggressively when cleaning, 60s otherwise
-      return isCleaning ? DeviceSession.POLL_ACTIVE_MS : DeviceSession.POLL_NO_MQTT_MS;
+      // No MQTT: poll aggressively while the robot is active, 60s otherwise
+      return isActive ? DeviceSession.POLL_ACTIVE_MS : DeviceSession.POLL_NO_MQTT_MS;
     }
 
-    // MQTT connected: backup poll — 60s cleaning, 180s idle
-    return isCleaning ? DeviceSession.POLL_MQTT_ACTIVE_MS : DeviceSession.POLL_MQTT_IDLE_MS;
+    // MQTT connected: backup poll — 60s while active, 5min when idle
+    return isActive ? DeviceSession.POLL_MQTT_ACTIVE_MS : DeviceSession.POLL_MQTT_IDLE_MS;
   }
 
   private schedulePoll(): void {
@@ -109,7 +113,7 @@ export class DeviceSession {
         const propsWithValues = props
           .filter((p) => p.value !== undefined)
           .map((p) => ({ siid: p.siid, piid: p.piid, value: p.value }));
-        this.processStateUpdate(propsWithValues);
+        this.processStateUpdate(propsWithValues, 'HTTP');
       }
       this.consecutivePollFailures = 0;
     } catch (err: unknown) {
@@ -124,12 +128,36 @@ export class DeviceSession {
     }
   }
 
-  private processStateUpdate(properties: Array<{ siid: number; piid: number; value: unknown }>): void {
+  private processStateUpdate(
+    properties: Array<{ siid: number; piid: number; value: unknown }>,
+    source: 'HTTP' | 'MQTT',
+  ): void {
+    this.log.debug(
+      `Dreame raw ${source} for ${this.deviceName}: ${JSON.stringify(
+        properties.map((property) => ({
+          property: `${property.siid}.${property.piid}`,
+          value: property.value,
+        })),
+      )}`,
+    );
+
     const currentState = this.accessoryHandler.getCurrentState();
     const newState = this.parser.processProperties(properties, currentState);
     const decodedCleanMode = newState.activity.cleanMode;
     const resolvedCleanMode = this.handlers.resolveCleanModeForState(decodedCleanMode);
     newState.activity.cleanMode = resolvedCleanMode;
+    this.log.debug(`Dreame normalized for ${this.deviceName}: ${JSON.stringify({
+      rawDeviceState: newState.activity.rawDeviceState,
+      runMode: newState.activity.runMode,
+      paused: newState.activity.paused,
+      maintenanceType: newState.activity.maintenanceType ?? null,
+      cleanMode: newState.activity.cleanMode,
+      activeErrorCode: newState.activity.activeErrorCode ?? null,
+      batteryPercent: newState.power.batteryPercent,
+      charging: newState.power.charging,
+      docked: newState.power.docked,
+      selectedRooms: newState.activity.selectedRooms,
+    })}`);
     this.accessoryHandler.onStateUpdate(newState);
     this.automationSensors?.updateState(newState);
     if (resolvedCleanMode !== currentState.activity.cleanMode) {

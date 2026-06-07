@@ -2,19 +2,23 @@ import { Logger } from '../util/logger.js';
 import {
   NormalizedState,
   DREAME_STATE,
-  DREAME_CLEAN_MODE,
   DREAME_CHARGE_STATUS,
   DREAME_MAINTENANCE_TYPE,
+  DREAME_PAUSED_STATES,
   SuctionLevel,
   WaterLevel,
 } from './models.js';
+import { DreameCleaningModeCodec } from './cleaning-mode.js';
 
 /**
  * Parses Dreame device properties (siid/piid pairs) into a NormalizedState.
  * Property mappings are based on the MIoT spec used by Dreame devices.
  */
 export class StateParser {
-  constructor(private readonly log: Logger) {}
+  constructor(
+    private readonly log: Logger,
+    private readonly cleaningModeCodec = new DreameCleaningModeCodec(),
+  ) {}
 
   /**
    * Process an array of property updates and return a new NormalizedState.
@@ -24,12 +28,47 @@ export class StateParser {
     currentState: NormalizedState,
   ): NormalizedState {
     const state = structuredClone(currentState);
+    let rawDeviceState: number | undefined;
+    let rawCleaningMode: number | undefined;
+
+    for (const prop of properties) {
+      if (prop.siid === 2 && prop.piid === 1 && typeof prop.value === 'number') {
+        rawDeviceState = prop.value;
+      }
+      if (prop.siid === 4 && prop.piid === 23 && typeof prop.value === 'number') {
+        rawCleaningMode = prop.value;
+      }
+    }
+
+    const previousLiftingMopEncoding = this.cleaningModeCodec.usesLiftingMopEncoding;
+    this.cleaningModeCodec.observeLiveState(rawDeviceState, rawCleaningMode);
+    if (previousLiftingMopEncoding !== this.cleaningModeCodec.usesLiftingMopEncoding) {
+      this.log.debug(
+        `Dreame cleaning-mode encoding learned from live state: `
+        + `${this.cleaningModeCodec.usesLiftingMopEncoding ? 'lifting-mop' : 'standard'} `
+        + `(state=${rawDeviceState}, raw 4.23=${rawCleaningMode})`,
+      );
+    }
 
     for (const prop of properties) {
       this.applyProperty(state, prop.siid, prop.piid, prop.value);
     }
 
+    this.normalizeCombinedState(state, rawDeviceState);
+
     return state;
+  }
+
+  private normalizeCombinedState(state: NormalizedState, rawDeviceState: number | undefined): void {
+    if (rawDeviceState === 1) state.activity.cleanMode = 'SWEEP';
+    if (rawDeviceState === 7) state.activity.cleanMode = 'MOP';
+    if (rawDeviceState === 12) state.activity.cleanMode = 'SWEEP_AND_MOP';
+
+    if (rawDeviceState === 29) {
+      state.activity.runMode = 'idle';
+      state.activity.paused = false;
+      state.power.docked = true;
+    }
   }
 
   private applyProperty(state: NormalizedState, siid: number, piid: number, value: unknown): void {
@@ -54,8 +93,9 @@ export class StateParser {
         const numValue = value as number;
         const runMode = DREAME_STATE[numValue];
         if (runMode) {
+          state.activity.rawDeviceState = numValue;
           state.activity.runMode = runMode;
-          state.activity.paused = numValue === 3;
+          state.activity.paused = DREAME_PAUSED_STATES.has(numValue);
           // Clear error if no longer in error state
           if (runMode !== 'error') {
             state.activity.activeError = null;
@@ -63,11 +103,8 @@ export class StateParser {
           }
           // Maintenance sub-type
           state.activity.maintenanceType = DREAME_MAINTENANCE_TYPE[numValue];
-          if (numValue === 1) state.activity.cleanMode = 'SWEEP';
-          if (numValue === 7) state.activity.cleanMode = 'MOP';
-          if (numValue === 12) state.activity.cleanMode = 'SWEEP_AND_MOP';
           // Docked states
-          const dockedStates = [2, 6, 9, 13]; // idle, charging, washing, charge complete
+          const dockedStates = [2, 6, 9, 13, 21, 22, 24, 29, 30, 32, 33, 34, 35, 36, 105, 106];
           if (dockedStates.includes(numValue)) {
             state.power.docked = true;
           }
@@ -124,7 +161,7 @@ export class StateParser {
       }
       case 23: { // Cleaning mode
         const rawMode = value as number;
-        const mode = DREAME_CLEAN_MODE[rawMode];
+        const mode = this.cleaningModeCodec.decode(rawMode);
         if (mode) {
           state.activity.cleanMode = mode;
         }

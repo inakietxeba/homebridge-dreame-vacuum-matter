@@ -12,6 +12,7 @@ const DREAME_RLC = '1c80b3787b2266776bcdc481f37d8fa42ba10a30af81a6df-1';
 const PATH_LOGIN = '/dreame-auth/oauth/token';
 const PATH_DEVICE_LIST = '/dreame-user-iot/iotuserbind/device/listV2';
 const PATH_DEVICE_INFO = '/dreame-user-iot/iotuserbind/device/info';
+const PATH_DOWNLOAD_URL = '/dreame-user-iot/iotfile/getDownloadUrl';
 const REQUEST_TIMEOUT_MS = 30_000;
 
 export interface DreameDevice {
@@ -24,10 +25,17 @@ export interface DreameDevice {
   bindDomain?: string;
 }
 
+export interface DreameDownloadUrlOptions {
+  deviceId: string;
+  model: string;
+  objectName: string;
+}
+
 export interface DreameProperty {
   did: string;
   siid: number;
   piid: number;
+  code?: number;
   value?: unknown;
 }
 
@@ -314,6 +322,27 @@ export class DreameCloud {
       aiid,
       in: params,
     });
+  }
+
+  async getFileDownloadUrl(options: DreameDownloadUrlOptions): Promise<string | null> {
+    const response = await this.request(PATH_DOWNLOAD_URL, {
+      did: options.deviceId,
+      model: options.model,
+      filename: options.objectName,
+      region: this.country,
+    });
+
+    if (response['code'] !== 0) return null;
+    const data = response['data'];
+    return typeof data === 'string' && data.length > 0 ? data : null;
+  }
+
+  async downloadText(url: string): Promise<string> {
+    const res = await this.fetchWithTimeout(url, { method: 'GET' });
+    if (!res.ok) {
+      throw new Error(`File download failed (HTTP ${res.status})`);
+    }
+    return res.text();
   }
 
   private firstString(...values: unknown[]): string | null {

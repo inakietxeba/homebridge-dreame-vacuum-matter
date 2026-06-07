@@ -6,3 +6,5 @@ coverage/
 homebridge.log*
 homebridge-dreame-vacuum-matter-1.0.0.tgz
 .DS_Store
+dreame-map-output
+scripts/

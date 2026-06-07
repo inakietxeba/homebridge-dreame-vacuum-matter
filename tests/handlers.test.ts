@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { MatterCommandHandlers } from '../src/matter/handlers';
 import { MIOT } from '../src/dreame/models';
+import { DreameCleaningModeCodec } from '../src/dreame/cleaning-mode';
 
 function createMockCloud() {
   return {
@@ -11,6 +12,21 @@ function createMockCloud() {
 
 function createMockLogger() {
   return { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() } as any;
+}
+
+function findStartCustomCall(cloud: ReturnType<typeof createMockCloud>) {
+  return cloud.action.mock.calls.find(
+    (call: any[]) =>
+      call[1] === MIOT.VACUUM.siid
+      && call[2] === MIOT.ACTION.START_CUSTOM
+      && Array.isArray(call[3])
+      && call[3].some((item: any) => item.piid === MIOT.VACUUM.CLEANING_PROPERTIES),
+  );
+}
+
+function parseStartCustomSelects(call: any[]) {
+  const cleaningProperty = call[3].find((item: any) => item.piid === MIOT.VACUUM.CLEANING_PROPERTIES);
+  return JSON.parse(cleaningProperty.value).selects;
 }
 
 describe('MatterCommandHandlers', () => {
@@ -119,6 +135,19 @@ describe('MatterCommandHandlers', () => {
       ]);
     });
 
+    it('should encode modes for robots with lifting mop pads', async () => {
+      const codec = new DreameCleaningModeCodec();
+      codec.configureLiftingMopPads(true);
+      handlers.setCleaningModeCodec(codec);
+
+      await handlers.handleCleaningMode('SWEEP');
+
+      expect(cloud.setProperties).toHaveBeenCalledWith('dev-1', [
+        { did: 'dev-1', siid: MIOT.VACUUM.siid, piid: MIOT.VACUUM.CLEAN_MODE, value: 2 },
+      ]);
+      expect(log.debug).toHaveBeenCalledWith(expect.stringContaining('lifting-mop encoding'));
+    });
+
     it('should invoke onCleanModeSelected callback', async () => {
       const cb = vi.fn();
       handlers.setOnCleanModeSelected(cb);
@@ -184,60 +213,48 @@ describe('MatterCommandHandlers', () => {
     it('should store pending room IDs', async () => {
       await handlers.handleRoomSelection([1, 3, 5]);
       // Verify by starting — should send cleaning properties
-      cloud.setProperties.mockClear();
+      cloud.action.mockClear();
       await handlers.handleStartCommand();
 
-      // Should have set CLEANING_PROPERTIES with room selects
-      const cleaningPropsCall = cloud.setProperties.mock.calls.find(
-        (call: any[]) => call[1]?.[0]?.piid === MIOT.VACUUM.CLEANING_PROPERTIES,
-      );
-      expect(cleaningPropsCall).toBeDefined();
-      const payload = JSON.parse(cleaningPropsCall![1][0].value);
-      expect(payload.selects).toHaveLength(3);
-      expect(payload.selects[0][0]).toBe(1);
-      expect(payload.selects[1][0]).toBe(3);
-      expect(payload.selects[2][0]).toBe(5);
+      const startCustomCall = findStartCustomCall(cloud);
+      expect(startCustomCall).toBeDefined();
+      const selects = parseStartCustomSelects(startCustomCall!);
+      expect(selects).toHaveLength(3);
+      expect(selects[0][0]).toBe(1);
+      expect(selects[1][0]).toBe(3);
+      expect(selects[2][0]).toBe(5);
     });
 
-    it('should clear pending rooms after start', async () => {
+    it('should preserve selected rooms after start', async () => {
       await handlers.handleRoomSelection([1, 2]);
       await handlers.handleStartCommand();
-      cloud.setProperties.mockClear();
       cloud.action.mockClear();
 
-      // Second start should not send cleaning properties
+      // Matter selection remains active until the controller changes it.
       await handlers.handleStartCommand();
-      const cleaningPropsCall = cloud.setProperties.mock.calls.find(
-        (call: any[]) => call[1]?.[0]?.piid === MIOT.VACUUM.CLEANING_PROPERTIES,
-      );
-      expect(cleaningPropsCall).toBeUndefined();
+      expect(findStartCustomCall(cloud)).toBeDefined();
     });
 
     it('should clear selection with empty array', async () => {
       await handlers.handleRoomSelection([1, 2]);
       await handlers.handleRoomSelection([]);
-      cloud.setProperties.mockClear();
+      cloud.action.mockClear();
 
       await handlers.handleStartCommand();
-      const cleaningPropsCall = cloud.setProperties.mock.calls.find(
-        (call: any[]) => call[1]?.[0]?.piid === MIOT.VACUUM.CLEANING_PROPERTIES,
-      );
-      expect(cleaningPropsCall).toBeUndefined();
+      expect(findStartCustomCall(cloud)).toBeUndefined();
     });
 
     it('should use current suction/water levels in room clean params', async () => {
       await handlers.handleSuctionLevel(3);
       await handlers.handleWaterLevel(3);
       await handlers.handleRoomSelection([10]);
-      cloud.setProperties.mockClear();
+      cloud.action.mockClear();
 
       await handlers.handleStartCommand();
-      const cleaningPropsCall = cloud.setProperties.mock.calls.find(
-        (call: any[]) => call[1]?.[0]?.piid === MIOT.VACUUM.CLEANING_PROPERTIES,
-      );
-      const payload = JSON.parse(cleaningPropsCall![1][0].value);
+      const startCustomCall = findStartCustomCall(cloud);
+      const selects = parseStartCustomSelects(startCustomCall!);
       // [roomId, repeat, suction, water, index]
-      expect(payload.selects[0]).toEqual([10, 1, 3, 3, 1]);
+      expect(selects[0]).toEqual([10, 1, 3, 3, 1]);
     });
 
     it('should preserve pendingRoomIds if START action fails', async () => {
@@ -247,14 +264,31 @@ describe('MatterCommandHandlers', () => {
       await expect(handlers.handleStartCommand()).rejects.toThrow('network error');
 
       // Rooms should still be pending — retry should send them again
-      cloud.setProperties.mockClear();
       cloud.action.mockResolvedValueOnce(undefined);
       await handlers.handleStartCommand();
 
-      const cleaningPropsCall = cloud.setProperties.mock.calls.find(
-        (call: any[]) => call[1]?.[0]?.piid === MIOT.VACUUM.CLEANING_PROPERTIES,
-      );
-      expect(cleaningPropsCall).toBeDefined();
+      expect(findStartCustomCall(cloud)).toBeDefined();
+    });
+
+    it('should map Matter area IDs to Dreame segment IDs', async () => {
+      handlers.setAreaIdToRoomIdMap(new Map([[100, '7']]));
+      await handlers.handleAreaSelection([100]);
+      cloud.action.mockClear();
+
+      await handlers.handleStartCommand();
+      const startCustomCall = findStartCustomCall(cloud);
+      const selects = parseStartCustomSelects(startCustomCall!);
+      expect(selects[0][0]).toBe(7);
+    });
+
+    it('should sync resolved room selection to accessory state', async () => {
+      const cb = vi.fn();
+      handlers.setAreaIdToRoomIdMap(new Map([[100, '7']]));
+      handlers.setOnRoomSelectionChanged(cb);
+
+      await handlers.handleAreaSelection([100]);
+
+      expect(cb).toHaveBeenCalledWith(['7']);
     });
   });
 
@@ -262,14 +296,12 @@ describe('MatterCommandHandlers', () => {
     it('should update suction and water levels from device state', async () => {
       handlers.syncLevelsFromDevice(3, 3);
       await handlers.handleRoomSelection([10]);
-      cloud.setProperties.mockClear();
+      cloud.action.mockClear();
 
       await handlers.handleStartCommand();
-      const cleaningPropsCall = cloud.setProperties.mock.calls.find(
-        (call: any[]) => call[1]?.[0]?.piid === MIOT.VACUUM.CLEANING_PROPERTIES,
-      );
-      const payload = JSON.parse(cleaningPropsCall![1][0].value);
-      expect(payload.selects[0]).toEqual([10, 1, 3, 3, 1]);
+      const startCustomCall = findStartCustomCall(cloud);
+      const selects = parseStartCustomSelects(startCustomCall!);
+      expect(selects[0]).toEqual([10, 1, 3, 3, 1]);
     });
   });
 });

@@ -171,7 +171,7 @@ describe('MatterClusterMapper', () => {
       const ps = result['PowerSource'] as Record<string, unknown>;
       expect(ps['batPercentRemaining']).toBe(150); // 75 * 2
       expect(ps['batChargeLevel']).toBe(0x00); // OK (>20%)
-      expect(ps['batChargeState']).toBe(0x03); // IS_CHARGING
+      expect(ps['batChargeState']).toBe(0x01); // IS_CHARGING
       expect(ps['batReplaceability']).toBe(1); // NOT_REPLACEABLE
     });
 
@@ -183,7 +183,7 @@ describe('MatterClusterMapper', () => {
       const result = MatterClusterMapper.toMatterState(state);
       const ps = result['PowerSource'] as Record<string, unknown>;
       expect(ps['batChargeLevel']).toBe(0x02); // CRITICAL (<=10%)
-      expect(ps['batChargeState']).toBe(0x01); // IS_NOT_CHARGING
+      expect(ps['batChargeState']).toBe(0x03); // IS_NOT_CHARGING
     });
   });
 
@@ -225,6 +225,22 @@ describe('MatterClusterMapper', () => {
       const map = MatterClusterMapper.buildAreaIdToRoomIdMap(state);
       expect(map.get(1)).toBe('1');
       expect(map.get(2)).toBe('2');
+    });
+
+    it('should avoid area id collisions across maps with repeated segment ids', () => {
+      const state = createInitialState(identity);
+      state.activity.knownMaps = [
+        { mapId: 100, rooms: [{ id: '1', name: 'Floor 1 Room' }] },
+        { mapId: 200, rooms: [{ id: '1', name: 'Floor 2 Room' }] },
+      ];
+      const serviceArea = MatterClusterMapper.buildServiceArea(state);
+      const map = MatterClusterMapper.buildAreaIdToRoomIdMap(state);
+
+      expect(serviceArea!.supportedAreas).toHaveLength(2);
+      expect(serviceArea!.supportedAreas[0]!.areaId).toBe(1);
+      expect(serviceArea!.supportedAreas[1]!.areaId).toBe(0x10001);
+      expect(map.get(1)).toBe('1');
+      expect(map.get(0x10001)).toBe('1');
     });
   });
 });

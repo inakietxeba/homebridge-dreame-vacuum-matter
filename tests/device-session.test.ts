@@ -87,6 +87,8 @@ describe('DeviceSession', () => {
       expect(parser.processProperties).toHaveBeenCalledWith(props, accessory.getCurrentState());
       expect(handlers.resolveCleanModeForState).toHaveBeenCalled();
       expect(accessory.onStateUpdate).toHaveBeenCalled();
+      expect(log.debug).toHaveBeenCalledWith(expect.stringContaining('Dreame raw MQTT'));
+      expect(log.debug).toHaveBeenCalledWith(expect.stringContaining('Dreame normalized'));
     });
 
     it('should update the automation sensors from MQTT state', () => {
@@ -193,6 +195,7 @@ describe('DeviceSession', () => {
         expect(parser.processProperties).toHaveBeenCalled();
       });
       expect(accessory.onStateUpdate).toHaveBeenCalled();
+      expect(log.debug).toHaveBeenCalledWith(expect.stringContaining('Dreame raw HTTP'));
     });
 
     it('should use shorter interval when cleaning without MQTT', async () => {

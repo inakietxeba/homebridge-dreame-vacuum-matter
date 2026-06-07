@@ -44,6 +44,21 @@ export interface MatterState {
 
 const NON_NUMERIC_AREA_OFFSET = 0x10000;
 
+function getStableAreaId(roomId: string, fallbackIndex: number, usedAreaIds: Set<number>): number {
+  const parsed = Number.parseInt(roomId, 10);
+  if (Number.isFinite(parsed) && parsed > 0 && !usedAreaIds.has(parsed)) {
+    usedAreaIds.add(parsed);
+    return parsed;
+  }
+
+  let areaId = NON_NUMERIC_AREA_OFFSET + fallbackIndex;
+  while (usedAreaIds.has(areaId)) {
+    areaId += 1;
+  }
+  usedAreaIds.add(areaId);
+  return areaId;
+}
+
 export class MatterClusterMapper {
   public static buildServiceArea(state: NormalizedState): ServiceAreaPayload | undefined {
     const knownMaps = state.activity.knownMaps ?? [];
@@ -59,14 +74,14 @@ export class MatterClusterMapper {
     if (useMapMode) {
       supportedMaps = mapsWithRooms.map((m, index) => ({
         mapId: m.mapId,
-        name: `Floor ${index + 1}`,
+        name: m.name?.trim() || `Floor ${index + 1}`,
       }));
 
       let globalIndex = 0;
+      const usedAreaIds = new Set<number>();
       for (const map of mapsWithRooms) {
         for (const room of map.rooms) {
-          const parsed = Number.parseInt(room.id, 10);
-          const areaId = Number.isFinite(parsed) && parsed > 0 ? parsed : NON_NUMERIC_AREA_OFFSET + globalIndex;
+          const areaId = getStableAreaId(room.id, globalIndex, usedAreaIds);
           const trimmedName = (room.name ?? '').trim();
           supportedAreas.push({
             areaId,
@@ -87,9 +102,9 @@ export class MatterClusterMapper {
       const rooms = MatterClusterMapper.normalizeRooms(state.activity.availableRooms);
       if (rooms.length === 0) return undefined;
 
+      const usedAreaIds = new Set<number>();
       supportedAreas = rooms.map((room, index) => {
-        const parsed = Number.parseInt(room.id, 10);
-        const areaId = Number.isFinite(parsed) && parsed > 0 ? parsed : NON_NUMERIC_AREA_OFFSET + index;
+        const areaId = getStableAreaId(room.id, index, usedAreaIds);
         const trimmedName = (room.name ?? '').trim();
         return {
           areaId,
@@ -177,9 +192,9 @@ export class MatterClusterMapper {
 
     // Map each areaId back to its room ID
     let globalIndex = 0;
+    const usedAreaIds = new Set<number>();
     for (const room of allRooms) {
-      const parsed = Number.parseInt(room.id, 10);
-      const areaId = Number.isFinite(parsed) && parsed > 0 ? parsed : NON_NUMERIC_AREA_OFFSET + globalIndex;
+      const areaId = getStableAreaId(room.id, globalIndex, usedAreaIds);
       result.set(areaId, room.id);
       globalIndex += 1;
     }

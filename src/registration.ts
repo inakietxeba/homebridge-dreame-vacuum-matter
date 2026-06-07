@@ -22,6 +22,19 @@ type WrapHandlerFn = <T extends unknown[]>(
   fn: (...args: T) => Promise<void>,
 ) => (...args: T) => Promise<void>;
 
+function extractAreaIds(request: unknown): number[] {
+  if (Array.isArray(request)) {
+    return request.filter((value): value is number => typeof value === 'number' && Number.isFinite(value));
+  }
+  if (!request || typeof request !== 'object') return [];
+
+  const record = request as Record<string, unknown>;
+  const areas = record['newAreas'] ?? record['selectedAreas'] ?? record['areas'] ?? record['areaIds'];
+  return Array.isArray(areas)
+    ? areas.filter((value): value is number => typeof value === 'number' && Number.isFinite(value))
+    : [];
+}
+
 function buildHandlers(
   handlers: MatterCommandHandlers,
   matter: MatterAPI,
@@ -96,7 +109,38 @@ function buildHandlers(
         }
       }),
     },
+    serviceArea: {
+      selectAreas: wrapHandler('serviceArea.selectAreas', async (request?: unknown) => {
+        const areaIds = extractAreaIds(request);
+        log.debug(`Matter ServiceArea selectAreas raw request: ${JSON.stringify(request ?? null)}`);
+        await handlers.handleAreaSelection(areaIds);
+        if (matter.updateAccessoryState) {
+          await matter.updateAccessoryState(uuid, cn?.ServiceArea ?? 'serviceArea', {
+            selectedAreas: areaIds,
+          });
+        }
+      }),
+      skipArea: wrapHandler('serviceArea.skipArea', async () => {
+        await handlers.handleAreaSelection([]);
+        if (matter.updateAccessoryState) {
+          await matter.updateAccessoryState(uuid, cn?.ServiceArea ?? 'serviceArea', {
+            selectedAreas: [],
+            currentArea: null,
+          });
+        }
+      }),
+    },
   };
+}
+
+export function buildMatterClusters(state: NormalizedState): Record<string, Record<string, unknown>> {
+  const matterState = MatterClusterMapper.toMatterState(state);
+  const clusters: Record<string, Record<string, unknown>> = {};
+  for (const [key, value] of Object.entries(matterState)) {
+    const lowerKey = key.charAt(0).toLowerCase() + key.slice(1);
+    clusters[lowerKey] = value as Record<string, unknown>;
+  }
+  return clusters;
 }
 
 /**
@@ -119,14 +163,7 @@ export function buildMatterAccessory(
     return undefined;
   }
 
-  // Build clusters from initial state
-  const matterState = MatterClusterMapper.toMatterState(initialState);
-  const clusters: Record<string, Record<string, unknown>> = {};
-  for (const [key, value] of Object.entries(matterState)) {
-    if (key === 'ServiceArea') continue; // Not supported for Dreame
-    const lowerKey = key.charAt(0).toLowerCase() + key.slice(1);
-    clusters[lowerKey] = value as Record<string, unknown>;
-  }
+  const clusters = buildMatterClusters(initialState);
 
   // Handler error wrapper
   const wrapHandler = <T extends unknown[]>(

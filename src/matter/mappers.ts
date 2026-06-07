@@ -1,4 +1,8 @@
-import { NormalizedState, PowerState, MaintenanceType } from '../dreame/models.js';
+import {
+  NormalizedState,
+  PowerState,
+  MaintenanceType,
+} from '../dreame/models.js';
 import { CleaningMode } from '../config.js';
 
 export enum MatterOperationalState {
@@ -25,9 +29,9 @@ export enum MatterRvcRunMode {
 
 export enum MatterChargeState {
   UNKNOWN = 0x00,
-  IS_NOT_CHARGING = 0x01,
+  IS_CHARGING = 0x01,
   IS_AT_MAX_CHARGE = 0x02,
-  IS_CHARGING = 0x03,
+  IS_NOT_CHARGING = 0x03,
 }
 
 export enum MatterRvcCleanMode {
@@ -39,7 +43,6 @@ export enum MatterRvcCleanMode {
 export enum MatterRvcCleanModeTag {
   VACUUM = 0x4001,
   MOP = 0x4002,
-  VACUUM_THEN_MOP = 0x4003,
 }
 
 export enum MatterRvcRunModeTag {
@@ -183,7 +186,14 @@ export class MatterMappers {
   private static readonly SUPPORTED_CLEAN_MODES = [
     { label: 'Sweep', mode: MatterRvcCleanMode.SWEEP, modeTags: [{ value: MatterRvcCleanModeTag.VACUUM }] },
     { label: 'Mop', mode: MatterRvcCleanMode.MOP, modeTags: [{ value: MatterRvcCleanModeTag.MOP }] },
-    { label: 'Sweep and Mop', mode: MatterRvcCleanMode.SWEEP_AND_MOP, modeTags: [{ value: MatterRvcCleanModeTag.VACUUM_THEN_MOP }] },
+    {
+      label: 'Sweep and Mop',
+      mode: MatterRvcCleanMode.SWEEP_AND_MOP,
+      modeTags: [
+        { value: MatterRvcCleanModeTag.VACUUM },
+        { value: MatterRvcCleanModeTag.MOP },
+      ],
+    },
   ];
 
   public static getSupportedCleanModes() { return MatterMappers.SUPPORTED_CLEAN_MODES; }
@@ -219,11 +229,17 @@ export class MatterMappers {
   public static getErrorStateList() { return MatterMappers.ERROR_STATE_LIST; }
 
   public static mapRvcRunMode(state: NormalizedState): MatterRvcRunMode {
+    // Matter has no "drying mop pads" run mode. Dreame allows a new task while
+    // drying, so expose it as idle rather than making controllers treat it as busy.
+    if (state.activity.rawDeviceState === 8) return MatterRvcRunMode.IDLE;
+
     switch (state.activity.runMode) {
       case 'cleaning': return MatterRvcRunMode.CLEANING;
       case 'returning': return MatterRvcRunMode.RETURNING_HOME;
       case 'mapping': return MatterRvcRunMode.MAPPING;
-      case 'maintenance': return MatterRvcRunMode.IDLE;
+      case 'maintenance': return state.activity.maintenanceType
+        ? MatterRvcRunMode.CLEANING
+        : MatterRvcRunMode.IDLE;
       case 'error':
       case 'idle':
       default: return MatterRvcRunMode.IDLE;
@@ -239,9 +255,14 @@ export class MatterMappers {
     }
   }
 
-  public static mapOperationalState(state: NormalizedState): MatterOperationalState {
+  public static mapOperationalState(state: NormalizedState): number {
     if (state.activity.activeError) return MatterOperationalState.ERROR;
     if (state.activity.paused) return MatterOperationalState.PAUSED;
+    // Dreame "Waiting for task" means the robot is settled at the dock with
+    // no resumable task, even when its charging-status property remains set.
+    if (state.activity.rawDeviceState === 29) return MatterOperationalState.DOCKED;
+    // Mop-pad drying is passive dock activity and does not prevent a new task.
+    if (state.activity.rawDeviceState === 8) return MatterOperationalState.DOCKED;
 
     switch (state.activity.runMode) {
       case 'cleaning': return MatterOperationalState.RUNNING;
@@ -295,4 +316,5 @@ export class MatterMappers {
       default: return MatterOperationalState.DOCKED;
     }
   }
+
 }

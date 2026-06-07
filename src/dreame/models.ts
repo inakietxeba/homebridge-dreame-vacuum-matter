@@ -16,6 +16,7 @@ export interface RoomInfo {
 /** Per-map room grouping for multi-floor devices. */
 export interface MapRooms {
   mapId: number;
+  name?: string;
   rooms: RoomInfo[];
 }
 
@@ -40,13 +41,29 @@ export const MIOT = {
   /** siid 3 — Battery service. */
   BATTERY: { siid: 3, LEVEL: 1, CHARGE_STATUS: 2 },
   /** siid 4 — Vacuum service. */
-  VACUUM: { siid: 4, SUCTION: 4, WATER: 5, CLEANING_PROPERTIES: 10, CLEAN_MODE: 23 },
+  VACUUM: {
+    siid: 4,
+    STATUS: 1,
+    SUCTION: 4,
+    WATER: 5,
+    CLEANING_PROPERTIES: 10,
+    CLEAN_MODE: 23,
+    SELF_WASH_BASE_STATUS: 25,
+  },
+  /** siid 15 — Dock capabilities. */
+  DOCK: { siid: 15, DUST_COLLECTION: 3 },
   /** siid 6 — Charge service. */
   CHARGE: { siid: 6 },
+  /** siid 6 — Map service. Names follow HA's Dreame mapping for map objects. */
+  MAP: { siid: 6, MAP_DATA: 1, FRAME_INFO: 2, OBJECT_NAME: 3, MAP_LIST: 8, RECOVERY_MAP_LIST: 9 },
   /** siid 7 — Find device service. Not present on every Dreame model. */
   LOCATE: { siid: 7 },
   /** Action IDs. */
-  ACTION: { START: 1, STOP: 2, PAUSE: 3, DOCK: 1, LOCATE: 1 },
+  ACTION: { START: 1, START_CUSTOM: 1, STOP: 2, PAUSE: 3, DOCK: 1, LOCATE: 1 },
+} as const;
+
+export const DREAME_STATUS = {
+  SEGMENT_CLEANING: 18,
 } as const;
 
 /** Properties to poll via HTTP for state updates. */
@@ -69,6 +86,7 @@ export interface PowerState {
 
 /** Activity state snapshot. */
 export interface ActivityState {
+  rawDeviceState: number | undefined;
   runMode: RunMode;
   paused: boolean;
   cleanMode: CleaningMode;
@@ -101,6 +119,7 @@ export function createInitialState(identity: Identity): NormalizedState {
     },
     activity: {
       runMode: 'idle',
+      rawDeviceState: undefined,
       paused: false,
       cleanMode: 'SWEEP_AND_MOP',
       suctionLevel: 1,
@@ -139,6 +158,39 @@ export const DREAME_STATE: Record<number, RunMode> = {
   16: 'returning', // Station reset
   17: 'cleaning',  // Returning install mop
   18: 'cleaning',  // Returning remove mop
+  19: 'maintenance', // Water check
+  20: 'maintenance', // Clean add water
+  21: 'maintenance', // Washing paused
+  22: 'maintenance', // Auto emptying
+  23: 'cleaning',  // Remote control
+  24: 'idle',      // Smart charging
+  25: 'cleaning',  // Second cleaning
+  26: 'cleaning',  // Human following
+  27: 'cleaning',  // Spot cleaning
+  28: 'returning', // Returning auto empty
+  29: 'idle',      // Waiting for task (docked, not actively charging)
+  30: 'maintenance', // Station cleaning
+  31: 'returning', // Returning to drain
+  32: 'maintenance', // Draining
+  33: 'maintenance', // Auto water draining
+  34: 'maintenance', // Emptying
+  35: 'maintenance', // Dust bag drying
+  36: 'maintenance', // Dust bag drying paused
+  37: 'returning', // Heading to extra cleaning
+  38: 'cleaning',  // Extra cleaning
+  95: 'cleaning', // Finding pet paused
+  96: 'cleaning', // Finding pet
+  97: 'cleaning', // Shortcut
+  98: 'cleaning', // Monitoring
+  99: 'cleaning', // Monitoring paused
+  101: 'cleaning', // Initial deep cleaning
+  102: 'cleaning', // Initial deep cleaning paused
+  103: 'cleaning', // Sanitizing
+  104: 'cleaning', // Sanitizing with dry
+  105: 'maintenance', // Changing mop
+  106: 'maintenance', // Changing mop paused
+  107: 'maintenance', // Floor maintaining
+  108: 'maintenance', // Floor maintaining paused
 };
 
 /** Maps Dreame state values to maintenance sub-types (when runMode === 'maintenance'). */
@@ -146,6 +198,54 @@ export const DREAME_MAINTENANCE_TYPE: Record<number, MaintenanceType> = {
   8: 'cleaning_mop',   // Drying
   9: 'cleaning_mop',   // Washing
   10: 'cleaning_mop',  // Going to wash
+  19: 'filling_water', // Water check
+  20: 'filling_water', // Clean add water
+  21: 'cleaning_mop',  // Washing paused
+  22: 'emptying_dustbin', // Auto emptying
+  30: 'cleaning_mop',  // Station cleaning
+  32: 'filling_water', // Draining
+  33: 'filling_water', // Auto water draining
+  34: 'emptying_dustbin', // Emptying
+  35: 'emptying_dustbin', // Dust bag drying
+  36: 'emptying_dustbin', // Dust bag drying paused
+  105: 'cleaning_mop', // Changing mop
+  106: 'cleaning_mop', // Changing mop paused
+  107: 'cleaning_mop', // Floor maintaining
+  108: 'cleaning_mop', // Floor maintaining paused
+};
+
+export const DREAME_PAUSED_STATES = new Set([3, 21, 36, 95, 99, 102, 106, 108]);
+
+export const DREAME_CUSTOM_STATE_LABELS: Record<number, string> = {
+  19: 'Water check',
+  20: 'Adding clean water',
+  21: 'Washing paused',
+  23: 'Remote control',
+  24: 'Smart charging',
+  25: 'Second cleaning',
+  26: 'Human following',
+  27: 'Spot cleaning',
+  29: 'Waiting for task',
+  31: 'Returning to drain',
+  32: 'Draining',
+  33: 'Auto water draining',
+  35: 'Dust bag drying',
+  36: 'Dust bag drying paused',
+  37: 'Heading to extra cleaning',
+  38: 'Extra cleaning',
+  95: 'Finding pet paused',
+  96: 'Finding pet',
+  97: 'Shortcut',
+  98: 'Monitoring',
+  99: 'Monitoring paused',
+  101: 'Initial deep cleaning',
+  102: 'Initial deep cleaning paused',
+  103: 'Sanitizing',
+  104: 'Sanitizing with dry',
+  105: 'Changing mop',
+  106: 'Changing mop paused',
+  107: 'Floor maintaining',
+  108: 'Floor maintaining paused',
 };
 
 /** Dreame cleaning mode values (siid 4, piid 23). */
