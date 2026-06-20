@@ -11,6 +11,7 @@ export class DeviceSession {
   private mqttClient: DreameMqttClient | null = null;
   private cloud: DreameCloud | null = null;
   private pollTimer: ReturnType<typeof setTimeout> | undefined;
+  private pollDueAt = 0;
   private mqttConnected = false;
   private isPolling = false;
   private disposed = false;
@@ -20,7 +21,7 @@ export class DeviceSession {
   /** Polling intervals. */
   private static readonly POLL_ACTIVE_MS = 15_000;       // 15s when cleaning without MQTT
   private static readonly POLL_MQTT_ACTIVE_MS = 60_000;   // 60s backup when MQTT + cleaning
-  private static readonly POLL_MQTT_IDLE_MS = 300_000;    // 5min heartbeat when MQTT + idle
+  private static readonly POLL_MQTT_IDLE_MS = 60_000;     // 60s heartbeat when MQTT + idle
   private static readonly POLL_NO_MQTT_MS = 60_000;       // 60s when no MQTT + idle
 
   constructor(
@@ -92,9 +93,19 @@ export class DeviceSession {
 
   private schedulePoll(): void {
     if (!this.cloud || this.disposed) return;
-    if (this.pollTimer) clearTimeout(this.pollTimer);
     const interval = this.getPollingInterval();
-    this.pollTimer = setTimeout(() => void this.poll(), interval);
+    const dueAt = Date.now() + interval;
+
+    // Keep an earlier poll deadline. Frequent partial MQTT messages must not
+    // postpone the HTTP fallback indefinitely.
+    if (this.pollTimer && this.pollDueAt <= dueAt) return;
+    if (this.pollTimer) clearTimeout(this.pollTimer);
+    this.pollDueAt = dueAt;
+    this.pollTimer = setTimeout(() => {
+      this.pollTimer = undefined;
+      this.pollDueAt = 0;
+      void this.poll();
+    }, interval);
   }
 
   private async poll(): Promise<void> {
@@ -171,6 +182,7 @@ export class DeviceSession {
   dispose(): void {
     this.disposed = true;
     if (this.pollTimer) clearTimeout(this.pollTimer);
+    this.pollDueAt = 0;
     this.mqttClient?.disconnect();
     this.mqttClient = null;
     this.cloud = null;

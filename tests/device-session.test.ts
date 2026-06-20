@@ -216,6 +216,22 @@ describe('DeviceSession', () => {
       vi.advanceTimersByTime(1_000);
       expect(cloud.getProperties).toHaveBeenCalled();
     });
+
+    it('should not postpone the HTTP fallback on repeated MQTT messages', async () => {
+      const session = new DeviceSession('dev-1', 'TestBot', handlers, accessory, parser, log);
+      const cloud = createMockCloud();
+      const mqttClient = createMockMqtt();
+      session.setCloud(cloud);
+      session.connectMqtt(mqttClient as any);
+      mqttClient.emit('connected');
+
+      await vi.advanceTimersByTimeAsync(50_000);
+      mqttClient.emit('message', [{ siid: 3, piid: 1, value: 95 }]);
+      mqttClient.emit('message', [{ siid: 4, piid: 4, value: 2 }]);
+      await vi.advanceTimersByTimeAsync(10_000);
+
+      expect(cloud.getProperties).toHaveBeenCalledOnce();
+    });
   });
 
   describe('dispose', () => {
