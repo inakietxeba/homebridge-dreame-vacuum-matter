@@ -59,7 +59,7 @@ export const MIOT = {
   /** siid 7 — Find device service. Not present on every Dreame model. */
   LOCATE: { siid: 7 },
   /** Action IDs. */
-  ACTION: { START: 1, START_CUSTOM: 1, STOP: 2, PAUSE: 3, DOCK: 1, LOCATE: 1 },
+  ACTION: { START: 1, START_CUSTOM: 1, STOP: 2, PAUSE: 2, DOCK: 1, LOCATE: 1 },
 } as const;
 
 export const DREAME_STATUS = {

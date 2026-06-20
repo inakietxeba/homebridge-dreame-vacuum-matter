@@ -122,7 +122,8 @@ export class MatterCommandHandlers {
 
     await this.setCleaningMode(this.currentCleanMode);
     this.modeSuppression.suppress(10_000);
-    await this.requireCloud().action(this.deviceId, MIOT.VACUUM.siid, MIOT.ACTION.START);
+    const result = await this.requireCloud().action(this.deviceId, MIOT.STATE.siid, MIOT.ACTION.START);
+    this.assertDreameActionSucceeded('START', result);
     this.log.debug('START_CLEANING sent successfully');
   }
 
@@ -210,12 +211,14 @@ export class MatterCommandHandlers {
 
   public async handlePauseCommand(): Promise<void> {
     if (this.pauseSuppression.isActive) return;
-    await this.requireCloud().action(this.deviceId, MIOT.VACUUM.siid, MIOT.ACTION.PAUSE);
+    const result = await this.requireCloud().action(this.deviceId, MIOT.STATE.siid, MIOT.ACTION.PAUSE);
+    this.assertDreameActionSucceeded('PAUSE', result);
   }
 
   public async handleResumeCommand(): Promise<void> {
     this.suppressPauseForCommandSequence();
-    await this.requireCloud().action(this.deviceId, MIOT.VACUUM.siid, MIOT.ACTION.START);
+    const result = await this.requireCloud().action(this.deviceId, MIOT.STATE.siid, MIOT.ACTION.START);
+    this.assertDreameActionSucceeded('START', result);
   }
 
   public async handleGoHomeCommand(): Promise<void> {

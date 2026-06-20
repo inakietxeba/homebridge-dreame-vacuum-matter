@@ -47,7 +47,7 @@ describe('MatterCommandHandlers', () => {
       expect(cloud.setProperties).toHaveBeenCalledWith('dev-1', [
         { did: 'dev-1', siid: MIOT.VACUUM.siid, piid: MIOT.VACUUM.CLEAN_MODE, value: 2 },
       ]);
-      expect(cloud.action).toHaveBeenCalledWith('dev-1', MIOT.VACUUM.siid, MIOT.ACTION.START);
+      expect(cloud.action).toHaveBeenCalledWith('dev-1', 2, 1);
     });
 
     it('should use the configured clean mode', async () => {
@@ -72,7 +72,7 @@ describe('MatterCommandHandlers', () => {
   describe('handlePauseCommand', () => {
     it('should send PAUSE action', async () => {
       await handlers.handlePauseCommand();
-      expect(cloud.action).toHaveBeenCalledWith('dev-1', MIOT.VACUUM.siid, MIOT.ACTION.PAUSE);
+      expect(cloud.action).toHaveBeenCalledWith('dev-1', 2, 2);
     });
 
     it('should suppress pause after start command', async () => {
@@ -87,7 +87,7 @@ describe('MatterCommandHandlers', () => {
   describe('handleResumeCommand', () => {
     it('should send START action', async () => {
       await handlers.handleResumeCommand();
-      expect(cloud.action).toHaveBeenCalledWith('dev-1', MIOT.VACUUM.siid, MIOT.ACTION.START);
+      expect(cloud.action).toHaveBeenCalledWith('dev-1', 2, 1);
     });
   });
 

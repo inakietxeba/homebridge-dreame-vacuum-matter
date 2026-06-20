@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+- Fixed the Dreame service/action IDs used by Matter start, pause, and resume commands.
+
 ## 1.0.3
 
 - Fixed the Dreame charging-service ID used by return-to-dock commands.
