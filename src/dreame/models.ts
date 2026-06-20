@@ -37,7 +37,7 @@ export type WaterLevel = 1 | 2 | 3;
 /** MIoT service/property/action IDs for Dreame robot vacuums. */
 export const MIOT = {
   /** siid 2 — Device state service. */
-  STATE: { siid: 2, STATE: 1, ERROR: 2 },
+  STATE: { siid: 2, STATE: 1, ERROR: 2, START: 1, PAUSE: 2 },
   /** siid 3 — Battery service. */
   BATTERY: { siid: 3, LEVEL: 1, CHARGE_STATUS: 2 },
   /** siid 4 — Vacuum service. */
@@ -49,17 +49,17 @@ export const MIOT = {
     CLEANING_PROPERTIES: 10,
     CLEAN_MODE: 23,
     SELF_WASH_BASE_STATUS: 25,
+    START_CUSTOM: 1,
+    STOP: 2,
   },
   /** siid 15 — Dock capabilities. */
   DOCK: { siid: 15, DUST_COLLECTION: 3 },
   /** siid 3 — Battery and charging service. */
-  CHARGE: { siid: 3 },
+  CHARGE: { siid: 3, DOCK: 1 },
   /** siid 6 — Map service. Names follow HA's Dreame mapping for map objects. */
   MAP: { siid: 6, MAP_DATA: 1, FRAME_INFO: 2, OBJECT_NAME: 3, MAP_LIST: 8, RECOVERY_MAP_LIST: 9 },
   /** siid 7 — Find device service. Not present on every Dreame model. */
-  LOCATE: { siid: 7 },
-  /** Action IDs. */
-  ACTION: { START: 1, START_CUSTOM: 1, STOP: 2, PAUSE: 2, DOCK: 1, LOCATE: 1 },
+  LOCATE: { siid: 7, LOCATE: 1 },
 } as const;
 
 export const DREAME_STATUS = {

@@ -108,7 +108,7 @@ export class MatterCommandHandlers {
         `Starting Dreame segment cleaning: map=${targetMapId ?? 'unknown'}, segments=[${segmentIds.join(', ')}]`,
       );
       this.log.debug(`Sending Dreame START_CUSTOM segment payload: ${JSON.stringify(payload)}`);
-      const result = await this.requireCloud().action(this.deviceId, MIOT.VACUUM.siid, MIOT.ACTION.START_CUSTOM, [
+      const result = await this.requireCloud().action(this.deviceId, MIOT.VACUUM.siid, MIOT.VACUUM.START_CUSTOM, [
         { piid: MIOT.VACUUM.STATUS, value: DREAME_STATUS.SEGMENT_CLEANING },
         {
           piid: MIOT.VACUUM.CLEANING_PROPERTIES,
@@ -122,7 +122,7 @@ export class MatterCommandHandlers {
 
     await this.setCleaningMode(this.currentCleanMode);
     this.modeSuppression.suppress(10_000);
-    const result = await this.requireCloud().action(this.deviceId, MIOT.STATE.siid, MIOT.ACTION.START);
+    const result = await this.requireCloud().action(this.deviceId, MIOT.STATE.siid, MIOT.STATE.START);
     this.assertDreameActionSucceeded('START', result);
     this.log.debug('START_CLEANING sent successfully');
   }
@@ -206,25 +206,26 @@ export class MatterCommandHandlers {
 
   public async handleStopCommand(): Promise<void> {
     this.log.info('Handling Matter Stop Command...');
-    await this.requireCloud().action(this.deviceId, MIOT.VACUUM.siid, MIOT.ACTION.STOP);
+    const result = await this.requireCloud().action(this.deviceId, MIOT.VACUUM.siid, MIOT.VACUUM.STOP);
+    this.assertDreameActionSucceeded('STOP', result);
   }
 
   public async handlePauseCommand(): Promise<void> {
     if (this.pauseSuppression.isActive) return;
-    const result = await this.requireCloud().action(this.deviceId, MIOT.STATE.siid, MIOT.ACTION.PAUSE);
+    const result = await this.requireCloud().action(this.deviceId, MIOT.STATE.siid, MIOT.STATE.PAUSE);
     this.assertDreameActionSucceeded('PAUSE', result);
   }
 
   public async handleResumeCommand(): Promise<void> {
     this.suppressPauseForCommandSequence();
-    const result = await this.requireCloud().action(this.deviceId, MIOT.STATE.siid, MIOT.ACTION.START);
+    const result = await this.requireCloud().action(this.deviceId, MIOT.STATE.siid, MIOT.STATE.START);
     this.assertDreameActionSucceeded('START', result);
   }
 
   public async handleGoHomeCommand(): Promise<void> {
     this.log.info('Handling Go Home Command...');
     this.suppressPauseForCommandSequence();
-    const result = await this.requireCloud().action(this.deviceId, MIOT.CHARGE.siid, MIOT.ACTION.DOCK);
+    const result = await this.requireCloud().action(this.deviceId, MIOT.CHARGE.siid, MIOT.CHARGE.DOCK);
     this.assertDreameActionSucceeded('DOCK', result);
     this.log.debug('DOCK sent successfully');
   }
@@ -232,7 +233,7 @@ export class MatterCommandHandlers {
   public async handleLocateCommand(): Promise<void> {
     this.log.info('Handling Matter Identify Command...');
     try {
-      const result = await this.requireCloud().action(this.deviceId, MIOT.LOCATE.siid, MIOT.ACTION.LOCATE);
+      const result = await this.requireCloud().action(this.deviceId, MIOT.LOCATE.siid, MIOT.LOCATE.LOCATE);
       this.assertDreameActionSucceeded('LOCATE', result);
       this.log.debug('LOCATE sent successfully');
     } catch (err: unknown) {

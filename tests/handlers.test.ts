@@ -18,7 +18,7 @@ function findStartCustomCall(cloud: ReturnType<typeof createMockCloud>) {
   return cloud.action.mock.calls.find(
     (call: any[]) =>
       call[1] === MIOT.VACUUM.siid
-      && call[2] === MIOT.ACTION.START_CUSTOM
+      && call[2] === MIOT.VACUUM.START_CUSTOM
       && Array.isArray(call[3])
       && call[3].some((item: any) => item.piid === MIOT.VACUUM.CLEANING_PROPERTIES),
   );
@@ -65,7 +65,7 @@ describe('MatterCommandHandlers', () => {
   describe('handleStopCommand', () => {
     it('should send STOP action', async () => {
       await handlers.handleStopCommand();
-      expect(cloud.action).toHaveBeenCalledWith('dev-1', MIOT.VACUUM.siid, MIOT.ACTION.STOP);
+      expect(cloud.action).toHaveBeenCalledWith('dev-1', 4, 2);
     });
   });
 
@@ -115,7 +115,7 @@ describe('MatterCommandHandlers', () => {
   describe('handleLocateCommand', () => {
     it('should send LOCATE action', async () => {
       await handlers.handleLocateCommand();
-      expect(cloud.action).toHaveBeenCalledWith('dev-1', MIOT.LOCATE.siid, MIOT.ACTION.LOCATE);
+      expect(cloud.action).toHaveBeenCalledWith('dev-1', 7, 1);
     });
 
     it('should not throw when locate is unsupported', async () => {
