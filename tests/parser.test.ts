@@ -223,6 +223,25 @@ describe('StateParser', () => {
     expect(result.activity.runMode).toBe('error');
   });
 
+  it('should retain an error code that arrives before the error state', () => {
+    const parser = new StateParser(logger);
+    const cleaning = createInitialState(identity);
+    cleaning.activity.runMode = 'cleaning';
+
+    const codeFirst = parser.processProperties(
+      [{ siid: 2, piid: 2, value: 1 }],
+      cleaning,
+    );
+    expect(codeFirst.activity.activeError).toBeNull();
+
+    const errorState = parser.processProperties(
+      [{ siid: 2, piid: 1, value: 4 }],
+      codeFirst,
+    );
+    expect(errorState.activity.activeError).toBe('Error 1');
+    expect(errorState.activity.activeErrorCode).toBe(1);
+  });
+
   it('should ignore stale error code while the robot reports mop maintenance', () => {
     const parser = new StateParser(logger);
     const state = createInitialState(identity);

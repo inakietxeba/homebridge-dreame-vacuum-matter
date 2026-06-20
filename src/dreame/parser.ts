@@ -15,6 +15,8 @@ import { DreameCleaningModeCodec } from './cleaning-mode.js';
  * Property mappings are based on the MIoT spec used by Dreame devices.
  */
 export class StateParser {
+  private pendingErrorCode: number | undefined;
+
   constructor(
     private readonly log: Logger,
     private readonly cleaningModeCodec = new DreameCleaningModeCodec(),
@@ -55,6 +57,14 @@ export class StateParser {
     }
 
     this.normalizeCombinedState(state, rawDeviceState);
+    if (rawDeviceState !== undefined) {
+      if (state.activity.runMode === 'error' && this.pendingErrorCode !== undefined) {
+        state.activity.activeError = `Error ${this.pendingErrorCode}`;
+        state.activity.activeErrorCode = this.pendingErrorCode;
+      } else if (state.activity.runMode !== 'error') {
+        this.pendingErrorCode = undefined;
+      }
+    }
 
     return state;
   }
@@ -113,12 +123,16 @@ export class StateParser {
       }
       case 2: { // Error code
         const errorCode = value as number;
-        if (errorCode !== 0 && state.activity.runMode === 'error') {
-          state.activity.activeError = `Error ${errorCode}`;
-          state.activity.activeErrorCode = errorCode;
-        } else {
+        if (errorCode === 0) {
+          this.pendingErrorCode = undefined;
           state.activity.activeError = null;
           state.activity.activeErrorCode = undefined;
+        } else {
+          this.pendingErrorCode = errorCode;
+          if (state.activity.runMode === 'error') {
+            state.activity.activeError = `Error ${errorCode}`;
+            state.activity.activeErrorCode = errorCode;
+          }
         }
         break;
       }
