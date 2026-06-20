@@ -2,17 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
-## 1.0.2
+## 1.0.3
 
-- Added an optional momentary HomeKit switch for return-to-dock actions in classic automations.
 - Fixed the Dreame charging-service ID used by return-to-dock commands.
 - Kept Matter run mode and operational state aligned after start, stop, resume, and return-to-dock commands.
 - Published the returning-home state immediately when the classic HomeKit dock switch is triggered.
 - Prevented partial MQTT messages from indefinitely postponing the HTTP state fallback.
 - Parsed Dreame Cloud MQTT property updates nested inside the `data` envelope.
 - Preserved error codes that arrive immediately before the matching MQTT error state.
-- Reset the automation switch to off after both successful and failed dock commands.
 - Deferred the switch reset until HomeKit finishes committing the trigger write.
+
+## 1.0.2
+
+- Added an optional momentary HomeKit switch for return-to-dock actions in classic automations.
 - Added automatic registration and cleanup of the optional switch when its setting changes.
 
 ## 1.0.1
