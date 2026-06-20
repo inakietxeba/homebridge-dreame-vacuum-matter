@@ -109,7 +109,11 @@ export class DreameMqttClient extends EventEmitter {
 
     this.client.on('message', (_topic, payload) => {
       try {
-        const message = JSON.parse(payload.toString()) as Record<string, unknown>;
+        const envelope = JSON.parse(payload.toString()) as Record<string, unknown>;
+        const nestedData = envelope['data'];
+        const message = nestedData && typeof nestedData === 'object' && !Array.isArray(nestedData)
+          ? nestedData as Record<string, unknown>
+          : envelope;
         if (message['method'] === 'properties_changed' && Array.isArray(message['params'])) {
           const properties = (message['params'] as Array<Record<string, unknown>>)
             .filter((p) => p['siid'] !== undefined && p['piid'] !== undefined && p['value'] !== undefined)

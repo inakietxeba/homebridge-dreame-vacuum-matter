@@ -9,6 +9,7 @@ All notable changes to this project will be documented in this file.
 - Kept Matter run mode and operational state aligned after start, stop, resume, and return-to-dock commands.
 - Published the returning-home state immediately when the classic HomeKit dock switch is triggered.
 - Prevented partial MQTT messages from indefinitely postponing the HTTP state fallback.
+- Parsed Dreame Cloud MQTT property updates nested inside the `data` envelope.
 - Reset the automation switch to off after both successful and failed dock commands.
 - Deferred the switch reset until HomeKit finishes committing the trigger write.
 - Added automatic registration and cleanup of the optional switch when its setting changes.

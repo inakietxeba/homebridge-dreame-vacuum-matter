@@ -47,4 +47,27 @@ describe('DreameMqttClient', () => {
     expect(mqtt.connect).toHaveBeenCalledTimes(2);
     expect(vi.mocked(mqtt.connect).mock.calls[1]![1]?.password).toBe('new-token');
   });
+
+  it.each([
+    ['direct', { method: 'properties_changed', params: [{ siid: 2, piid: 1, value: 5 }] }],
+    ['nested', { id: 750, data: { method: 'properties_changed', params: [{ siid: 2, piid: 1, value: 5 }] } }],
+  ])('emits properties from the %s MQTT payload format', (_name, payload) => {
+    const mqttClient = new MockMqttClient();
+    vi.mocked(mqtt.connect).mockReturnValueOnce(mqttClient as any);
+    const client = new DreameMqttClient(createMockLogger(), {
+      host: 'mqtt.example.com:19328',
+      did: 'device-1',
+      uid: 'user-1',
+      model: 'dreame.vacuum.test',
+      accessToken: 'token',
+      country: 'eu',
+    });
+    const onMessage = vi.fn();
+    client.on('message', onMessage);
+    client.connect();
+
+    mqttClient.emit('message', '/status/topic', Buffer.from(JSON.stringify(payload)));
+
+    expect(onMessage).toHaveBeenCalledWith([{ siid: 2, piid: 1, value: 5 }]);
+  });
 });
