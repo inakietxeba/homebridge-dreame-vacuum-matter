@@ -18,6 +18,7 @@ describe('Config', () => {
     expect(config.country).toBe('eu');
     expect(config.username).toBe('test@example.com');
     expect(config.password).toBe('secret');
+    expect(config.automationDockSwitch).toBe(false);
     expect(config.mapOverrides).toEqual([]);
 
     // Restore

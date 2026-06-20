@@ -11,6 +11,7 @@ Connects to **Dreame Cloud** for authentication and device commands, and subscri
 - **Cleaning modes**: Sweep, Mop, Sweep & Mop — selectable from Apple Home
 - **Operational states**: Running, Paused, Docked, Charging, Seeking Charger, Error
 - **Optional automation sensors**: Disabled by default; exposes separate HomeKit contact sensors for Idle, Busy, Cleaning, and Error states
+- **Optional dock automation**: Exposes a momentary HomeKit switch for return-to-dock actions in classic automations
 - **Identify support**: Locate/identify command is forwarded to compatible Dreame models
 - **Auto token refresh**: Seamless credential management with Dreame Cloud
 
@@ -57,6 +58,7 @@ Or search for `homebridge-dreame-vacuum-matter` in the Homebridge UI.
 | `password` | — | Dreame/Dreamehome app password. Overridable via `DREAME_PASSWORD` env var |
 | `country` | `eu` | Cloud region: `cn`, `eu`, `us`, `sg`, `kr`, `ru` |
 | `automationContactSensors` | `false` | Create HomeKit contact sensors for Apple Home automations. Disabling later removes these sensors |
+| `automationDockSwitch` | `false` | Create a momentary HomeKit switch that sends the vacuum back to its dock |
 | `mapOverrides` | `[]` | Replace discovered floor/map and room names, optionally scoped by device ID |
 
 Room names can be overridden using the segment and map IDs printed in debug logs:

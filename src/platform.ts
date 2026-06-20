@@ -18,6 +18,10 @@ import {
   AutomationContactSensors,
   SensorKey,
 } from './homekit/automation-sensors.js';
+import {
+  AUTOMATION_DOCK_SWITCH_CONTEXT_KIND,
+  AutomationDockSwitch,
+} from './homekit/automation-dock-switch.js';
 
 export class DreameVacuumMatterPlatform implements DynamicPlatformPlugin {
   private readonly config: DreamePlatformConfig;
@@ -144,6 +148,9 @@ export class DreameVacuumMatterPlatform implements DynamicPlatformPlugin {
           this.activeHapAccessoryUuids.add(this.getAutomationSensorUuid(deviceId, definition.key));
         }
       }
+      if (this.config.automationDockSwitch) {
+        this.activeHapAccessoryUuids.add(this.getAutomationDockSwitchUuid(deviceId));
+      }
 
       // Get device info (sets host for sendCommand routing)
       await cloud.getDeviceInfo(deviceId);
@@ -266,6 +273,9 @@ export class DreameVacuumMatterPlatform implements DynamicPlatformPlugin {
       const automationSensors = this.config.automationContactSensors
         ? this.setupAutomationSensors(deviceName, deviceId, deviceModel, initialState)
         : undefined;
+      if (this.config.automationDockSwitch) {
+        this.setupAutomationDockSwitch(deviceName, deviceId, deviceModel, handlers);
+      }
 
       // Create accessory handler for state push
       accessoryHandler = new DreameVacuumAccessory(this.log.getRaw(), uuid, initialState, this.api, {
@@ -360,9 +370,47 @@ export class DreameVacuumMatterPlatform implements DynamicPlatformPlugin {
     return this.api.hap.uuid.generate(`${deviceId}:automation-contact-sensor:${key}`);
   }
 
+  private setupAutomationDockSwitch(
+    deviceName: string,
+    deviceId: string,
+    model: string,
+    handlers: MatterCommandHandlers,
+  ): void {
+    const uuid = this.getAutomationDockSwitchUuid(deviceId);
+    const name = `${deviceName} Return to Dock`;
+    let accessory = this.accessories.find((cached) => cached.UUID === uuid);
+
+    if (!accessory) {
+      accessory = new this.api.platformAccessory(name, uuid);
+      accessory.category = this.api.hap.Categories.SWITCH;
+      this.api.registerPlatformAccessories(
+        'homebridge-dreame-vacuum-matter',
+        'DreameVacuumMatter',
+        [accessory],
+      );
+      this.accessories.push(accessory);
+      this.log.info(`Registered return-to-dock automation switch: ${name}`);
+    }
+
+    new AutomationDockSwitch(
+      this.api,
+      accessory,
+      this.log,
+      deviceName,
+      deviceId,
+      model,
+      () => handlers.handleGoHomeCommand(),
+    );
+  }
+
+  private getAutomationDockSwitchUuid(deviceId: string): string {
+    return this.api.hap.uuid.generate(`${deviceId}:automation-dock-switch`);
+  }
+
   private cleanupStaleHapAccessories(): void {
     const stale = this.accessories.filter((accessory) =>
-      accessory.context.kind === AUTOMATION_CONTACT_SENSORS_CONTEXT_KIND
+      (accessory.context.kind === AUTOMATION_CONTACT_SENSORS_CONTEXT_KIND
+        || accessory.context.kind === AUTOMATION_DOCK_SWITCH_CONTEXT_KIND)
       && !this.activeHapAccessoryUuids.has(accessory.UUID),
     );
 

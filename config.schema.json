@@ -47,6 +47,12 @@
         "default": false,
         "description": "Expose optional HomeKit contact sensors for automations: Idle, Busy, Cleaning, and Error. Disabled by default; disabling later removes these sensors."
       },
+      "automationDockSwitch": {
+        "title": "Expose Return-to-Dock Automation Switch",
+        "type": "boolean",
+        "default": false,
+        "description": "Expose an optional momentary HomeKit switch that sends the vacuum back to its dock. Use it as an action in classic HomeKit automations."
+      },
       "mapOverrides": {
         "title": "Map and Room Name Overrides",
         "type": "array",

@@ -20,6 +20,7 @@ export const platformConfigSchema = z.object({
   password: z.string().max(256).optional(),
   country: z.enum(['cn', 'eu', 'us', 'sg', 'kr', 'ru']).optional().default('eu'),
   automationContactSensors: z.boolean().optional().default(false),
+  automationDockSwitch: z.boolean().optional().default(false),
   mapOverrides: z.array(mapOverrideSchema).optional().default([]),
 });
 

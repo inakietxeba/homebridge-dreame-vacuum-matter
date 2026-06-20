@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## 1.0.2
+
+- Added an optional momentary HomeKit switch for return-to-dock actions in classic automations.
+- Reset the automation switch to off after both successful and failed dock commands.
+- Added automatic registration and cleanup of the optional switch when its setting changes.
+
 ## 1.0.1
 
 - Added Matter room selection and customized segment cleaning across discovered Dreame maps.
