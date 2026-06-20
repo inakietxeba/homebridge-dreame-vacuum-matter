@@ -2,6 +2,7 @@ import type { API, PlatformAccessory, Service } from 'homebridge';
 import { Logger } from '../util/logger.js';
 
 export const AUTOMATION_DOCK_SWITCH_CONTEXT_KIND = 'dreameAutomationDockSwitch';
+const RESET_DELAY_MS = 250;
 
 export class AutomationDockSwitch {
   private readonly service: Service;
@@ -41,7 +42,11 @@ export class AutomationDockSwitch {
         try {
           await this.returnToDock();
         } finally {
-          this.service.updateCharacteristic(Characteristic.On, false);
+          // Let HAP finish committing the incoming On write before resetting it.
+          // Resetting synchronously here can be overwritten when onSet resolves.
+          setTimeout(() => {
+            this.service.updateCharacteristic(Characteristic.On, false);
+          }, RESET_DELAY_MS);
         }
       });
     this.service.updateCharacteristic(Characteristic.On, false);

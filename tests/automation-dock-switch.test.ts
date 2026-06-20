@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AutomationDockSwitch, AUTOMATION_DOCK_SWITCH_CONTEXT_KIND } from '../src/homekit/automation-dock-switch';
 
 function createFixture(returnToDock = vi.fn().mockResolvedValue(undefined)) {
@@ -52,6 +52,14 @@ function createFixture(returnToDock = vi.fn().mockResolvedValue(undefined)) {
 }
 
 describe('AutomationDockSwitch', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it('should expose a stateless return-to-dock switch', async () => {
     const fixture = createFixture();
 
@@ -61,10 +69,13 @@ describe('AutomationDockSwitch', () => {
       model: 'dreame.vacuum.test',
     });
     expect(fixture.getOnGet()()).toBe(false);
+    fixture.switchService.updateCharacteristic.mockClear();
 
     await fixture.getOnSet()(true);
 
     expect(fixture.returnToDock).toHaveBeenCalledOnce();
+    expect(fixture.switchService.updateCharacteristic).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(250);
     expect(fixture.switchService.updateCharacteristic).toHaveBeenLastCalledWith('On', false);
   });
 
@@ -79,8 +90,11 @@ describe('AutomationDockSwitch', () => {
   it('should reset after a failed dock command', async () => {
     const returnToDock = vi.fn().mockRejectedValue(new Error('cloud failed'));
     const fixture = createFixture(returnToDock);
+    fixture.switchService.updateCharacteristic.mockClear();
 
     await expect(fixture.getOnSet()(true)).rejects.toThrow('cloud failed');
+    expect(fixture.switchService.updateCharacteristic).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(250);
     expect(fixture.switchService.updateCharacteristic).toHaveBeenLastCalledWith('On', false);
   });
 });

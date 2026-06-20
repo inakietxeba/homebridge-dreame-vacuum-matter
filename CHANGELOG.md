@@ -8,6 +8,7 @@ All notable changes to this project will be documented in this file.
 - Fixed the Dreame charging-service ID used by return-to-dock commands.
 - Kept Matter run mode and operational state aligned after start, stop, resume, and return-to-dock commands.
 - Reset the automation switch to off after both successful and failed dock commands.
+- Deferred the switch reset until HomeKit finishes committing the trigger write.
 - Added automatic registration and cleanup of the optional switch when its setting changes.
 
 ## 1.0.1
