@@ -165,6 +165,7 @@ export class DeviceSession {
     }
     // Keep suction/water levels in sync so room clean uses correct values
     this.handlers.syncLevelsFromDevice(newState.activity.suctionLevel, newState.activity.waterLevel);
+    this.handlers.syncCurrentMapId(newState.activity.currentMapId);
   }
 
   dispose(): void {

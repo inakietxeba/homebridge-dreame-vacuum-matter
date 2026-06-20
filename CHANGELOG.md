@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## 1.0.1
+
+- Added Matter room selection and customized segment cleaning across discovered Dreame maps.
+- Added expanded Dreame state parsing, cleaning-mode handling, and optional automation sensors.
+- Fixed segment-cleaning payloads for newer models and surfaced failed Dreame actions.
+- Prevented room selections from mixing maps or targeting a map other than the active one.
+- Kept duplicate room segment IDs associated with the correct Matter map and area.
+- Reported Matter room skipping as unsupported instead of clearing the active selection.
+
 ## 1.0.0
 
 - Initial Matter-native Homebridge v2 plugin for Dreame vacuum robots.

@@ -257,6 +257,27 @@ describe('MatterCommandHandlers', () => {
       expect(selects[0]).toEqual([10, 1, 3, 3, 1]);
     });
 
+    it('should use customized-cleaning index 1 for every selected room', async () => {
+      await handlers.handleRoomSelection([3, 5]);
+      cloud.action.mockClear();
+
+      await handlers.handleStartCommand();
+
+      expect(parseStartCustomSelects(findStartCustomCall(cloud)!)).toEqual([
+        [3, 1, 1, 2, 1],
+        [5, 1, 1, 2, 1],
+      ]);
+    });
+
+    it('should not set the global clean mode before a room-cleaning task', async () => {
+      await handlers.handleRoomSelection([3]);
+      cloud.setProperties.mockClear();
+
+      await handlers.handleStartCommand();
+
+      expect(cloud.setProperties).not.toHaveBeenCalled();
+    });
+
     it('should preserve pendingRoomIds if START action fails', async () => {
       await handlers.handleRoomSelection([1, 2]);
       cloud.action.mockRejectedValueOnce(new Error('network error'));
@@ -270,8 +291,16 @@ describe('MatterCommandHandlers', () => {
       expect(findStartCustomCall(cloud)).toBeDefined();
     });
 
+    it('should reject a non-zero Dreame START_CUSTOM response', async () => {
+      await handlers.handleRoomSelection([1]);
+      cloud.action.mockResolvedValueOnce({ code: -1 });
+
+      await expect(handlers.handleStartCommand()).rejects.toThrow('START_CUSTOM returned Dreame code -1');
+    });
+
     it('should map Matter area IDs to Dreame segment IDs', async () => {
-      handlers.setAreaIdToRoomIdMap(new Map([[100, '7']]));
+      handlers.setAreaIdToRoomTargetMap(new Map([[100, { areaId: 100, mapId: 10, segmentId: '7' }]]));
+      handlers.syncCurrentMapId(10);
       await handlers.handleAreaSelection([100]);
       cloud.action.mockClear();
 
@@ -283,12 +312,44 @@ describe('MatterCommandHandlers', () => {
 
     it('should sync resolved room selection to accessory state', async () => {
       const cb = vi.fn();
-      handlers.setAreaIdToRoomIdMap(new Map([[100, '7']]));
-      handlers.setOnRoomSelectionChanged(cb);
+      handlers.setAreaIdToRoomTargetMap(new Map([[100, { areaId: 100, mapId: 10, segmentId: '7' }]]));
+      handlers.setOnAreaSelectionChanged(cb);
 
       await handlers.handleAreaSelection([100]);
 
-      expect(cb).toHaveBeenCalledWith(['7']);
+      expect(cb).toHaveBeenCalledWith(['100']);
+    });
+
+    it('should reject rooms from multiple maps in one task', async () => {
+      handlers.setAreaIdToRoomTargetMap(new Map([
+        [100, { areaId: 100, mapId: 10, segmentId: '7' }],
+        [200, { areaId: 200, mapId: 20, segmentId: '8' }],
+      ]));
+
+      await expect(handlers.handleAreaSelection([100, 200])).rejects.toThrow('multiple maps');
+    });
+
+    it('should reject a room task when its map is not active', async () => {
+      handlers.setAreaIdToRoomTargetMap(new Map([[100, { areaId: 100, mapId: 20, segmentId: '7' }]]));
+      handlers.syncCurrentMapId(10);
+      await handlers.handleAreaSelection([100]);
+
+      await expect(handlers.handleStartCommand()).rejects.toThrow('current map is 10');
+      expect(findStartCustomCall(cloud)).toBeUndefined();
+    });
+  });
+
+  describe('handleSkipArea', () => {
+    it('should reject skip without changing the selected rooms', async () => {
+      handlers.setAreaIdToRoomTargetMap(new Map([[100, { areaId: 100, mapId: 10, segmentId: '7' }]]));
+      await handlers.handleAreaSelection([100]);
+
+      await expect(handlers.handleSkipArea(100)).rejects.toThrow('not supported');
+
+      cloud.action.mockClear();
+      await handlers.handleStartCommand();
+      expect(parseStartCustomSelects(findStartCustomCall(cloud)!)[0][0]).toBe(7);
+      expect(log.warn).toHaveBeenCalledWith(expect.stringContaining('map:10/segment:7'));
     });
   });
 

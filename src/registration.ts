@@ -120,14 +120,8 @@ function buildHandlers(
           });
         }
       }),
-      skipArea: wrapHandler('serviceArea.skipArea', async () => {
-        await handlers.handleAreaSelection([]);
-        if (matter.updateAccessoryState) {
-          await matter.updateAccessoryState(uuid, cn?.ServiceArea ?? 'serviceArea', {
-            selectedAreas: [],
-            currentArea: null,
-          });
-        }
+      skipArea: wrapHandler('serviceArea.skipArea', async (request?: { skippedArea?: number }) => {
+        await handlers.handleSkipArea(request?.skippedArea);
       }),
     },
   };

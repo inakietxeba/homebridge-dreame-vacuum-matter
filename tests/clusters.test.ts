@@ -243,4 +243,35 @@ describe('MatterClusterMapper', () => {
       expect(map.get(0x10001)).toBe('1');
     });
   });
+
+  describe('buildAreaIdToRoomTargetMap', () => {
+    it('should retain map and segment identity for repeated segment IDs', () => {
+      const state = createInitialState(identity);
+      state.activity.knownMaps = [
+        { mapId: 100, rooms: [{ id: '1', name: 'Floor 1 Room' }] },
+        { mapId: 200, rooms: [{ id: '1', name: 'Floor 2 Room' }] },
+      ];
+
+      const map = MatterClusterMapper.buildAreaIdToRoomTargetMap(state);
+
+      expect(map.get(1)).toEqual({ areaId: 1, mapId: 100, segmentId: '1' });
+      expect(map.get(0x10001)).toEqual({ areaId: 0x10001, mapId: 200, segmentId: '1' });
+    });
+  });
+
+  it('should resolve duplicate selected segment IDs against the current map', () => {
+    const state = createInitialState(identity);
+    state.activity.knownMaps = [
+      { mapId: 100, rooms: [{ id: '1', name: 'Floor 1 Room' }] },
+      { mapId: 200, rooms: [{ id: '1', name: 'Floor 2 Room' }] },
+    ];
+    state.activity.currentMapId = 200;
+    state.activity.selectedRooms = ['1'];
+    state.activity.runMode = 'cleaning';
+
+    const serviceArea = MatterClusterMapper.buildServiceArea(state);
+
+    expect(serviceArea?.selectedAreas).toEqual([0x10001]);
+    expect(serviceArea?.currentArea).toBe(0x10001);
+  });
 });

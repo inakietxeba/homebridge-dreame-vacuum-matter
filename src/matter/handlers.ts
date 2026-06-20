@@ -3,6 +3,7 @@ import { Logger } from '../util/logger.js';
 import { CleaningMode } from '../config.js';
 import { DREAME_STATUS, MIOT, SuctionLevel, WaterLevel } from '../dreame/models.js';
 import { DreameCleaningModeCodec } from '../dreame/cleaning-mode.js';
+import { DreameAreaTarget } from './clusters.js';
 
 class TemporalSuppression {
   private until = 0;
@@ -21,9 +22,10 @@ export class MatterCommandHandlers {
   private currentCleanMode: CleaningMode;
   private readonly modeSuppression = new TemporalSuppression();
   private onCleanModeSelected?: (mode: CleaningMode) => void;
-  private onRoomSelectionChanged?: (roomIds: string[]) => void;
-  private pendingRoomIds: number[] | null = null;
-  private areaIdToRoomIdMap = new Map<number, string>();
+  private onAreaSelectionChanged?: (areaIds: string[]) => void;
+  private pendingAreas: DreameAreaTarget[] | null = null;
+  private areaIdToRoomTargetMap = new Map<number, DreameAreaTarget>();
+  private currentMapId: number | undefined;
 
   constructor(
     private cloud: DreameCloud | null,
@@ -53,17 +55,23 @@ export class MatterCommandHandlers {
     this.onCleanModeSelected = callback;
   }
 
-  public setOnRoomSelectionChanged(callback: (roomIds: string[]) => void): void {
-    this.onRoomSelectionChanged = callback;
+  public setOnAreaSelectionChanged(callback: (areaIds: string[]) => void): void {
+    this.onAreaSelectionChanged = callback;
   }
 
-  public setAreaIdToRoomIdMap(map: Map<number, string>): void {
-    this.areaIdToRoomIdMap = new Map(map);
+  public setAreaIdToRoomTargetMap(map: Map<number, DreameAreaTarget>): void {
+    this.areaIdToRoomTargetMap = new Map(map);
     this.log.debug(
-      this.areaIdToRoomIdMap.size > 0
-        ? `Matter ServiceArea mapping loaded: ${[...this.areaIdToRoomIdMap.entries()].map(([areaId, roomId]) => `${areaId}->${roomId}`).join(', ')}`
+      this.areaIdToRoomTargetMap.size > 0
+        ? `Matter ServiceArea mapping loaded: ${[...this.areaIdToRoomTargetMap.values()]
+          .map(({ areaId, mapId, segmentId }) => `${areaId}->map:${mapId ?? 'unknown'}/segment:${segmentId}`)
+          .join(', ')}`
         : 'Matter ServiceArea mapping cleared or empty',
     );
+  }
+
+  public syncCurrentMapId(mapId: number | undefined): void {
+    this.currentMapId = mapId;
   }
 
   public isCleanModeSuppressionActive(): boolean {
@@ -78,69 +86,114 @@ export class MatterCommandHandlers {
     this.log.info('Handling Matter Start Command...');
     this.suppressPauseForCommandSequence();
 
-    // Set cleaning mode first
-    await this.setCleaningMode(this.currentCleanMode);
-    this.modeSuppression.suppress(10_000);
-
     if (isPaused) {
       this.log.debug('Robot is paused — sending START');
     }
 
-    // If rooms are selected, send room-specific clean command
-    const roomsToClean = this.pendingRoomIds;
-    if (roomsToClean && roomsToClean.length > 0) {
-      const selects = roomsToClean.map((roomId, index) => [
-        roomId,
+    // Segment jobs use the settings stored for each room when customized cleaning is enabled.
+    const areasToClean = this.pendingAreas;
+    if (areasToClean && areasToClean.length > 0) {
+      this.assertAreasBelongToCurrentMap(areasToClean);
+      const segmentIds = areasToClean.map((area) => Number.parseInt(area.segmentId, 10));
+      const selects = segmentIds.map((segmentId) => [
+        segmentId,
         1, // repeat count
         this.getCurrentSuctionLevel(),
         this.getCurrentWaterLevel(),
-        index + 1,
+        1, // HA uses 1 for customized cleaning; sequence values break some newer models
       ]);
       const payload = { selects };
+      const targetMapId = areasToClean[0]?.mapId ?? null;
+      this.log.debug(
+        `Starting Dreame segment cleaning: map=${targetMapId ?? 'unknown'}, segments=[${segmentIds.join(', ')}]`,
+      );
       this.log.debug(`Sending Dreame START_CUSTOM segment payload: ${JSON.stringify(payload)}`);
-      await this.requireCloud().action(this.deviceId, MIOT.VACUUM.siid, MIOT.ACTION.START_CUSTOM, [
+      const result = await this.requireCloud().action(this.deviceId, MIOT.VACUUM.siid, MIOT.ACTION.START_CUSTOM, [
         { piid: MIOT.VACUUM.STATUS, value: DREAME_STATUS.SEGMENT_CLEANING },
         {
           piid: MIOT.VACUUM.CLEANING_PROPERTIES,
           value: JSON.stringify(payload),
         },
       ]);
-      this.log.debug(`Room clean sent for rooms [${roomsToClean.join(', ')}]`);
+      this.assertDreameActionSucceeded('START_CUSTOM', result);
+      this.log.debug(`Room clean sent for segments [${segmentIds.join(', ')}]`);
       return;
     }
 
+    await this.setCleaningMode(this.currentCleanMode);
+    this.modeSuppression.suppress(10_000);
     await this.requireCloud().action(this.deviceId, MIOT.VACUUM.siid, MIOT.ACTION.START);
     this.log.debug('START_CLEANING sent successfully');
   }
 
   public async handleAreaSelection(areaIds: number[]): Promise<void> {
     this.log.debug(`Matter ServiceArea SelectAreas received: [${areaIds.join(', ')}]`);
-    const roomIds: number[] = [];
+    const areas: DreameAreaTarget[] = [];
     for (const areaId of areaIds) {
-      const roomId = this.areaIdToRoomIdMap.get(areaId) ?? String(areaId);
-      const segmentId = Number.parseInt(roomId, 10);
+      const target = this.areaIdToRoomTargetMap.get(areaId);
+      if (!target) {
+        throw new Error(`Matter area ${areaId} is not mapped to a Dreame room`);
+      }
+      const segmentId = Number.parseInt(target.segmentId, 10);
       if (Number.isFinite(segmentId) && segmentId > 0) {
-        roomIds.push(segmentId);
+        areas.push(target);
       } else {
-        this.log.warn(`Ignoring non-numeric Dreame room id "${roomId}" for Matter area ${areaId}`);
+        throw new Error(`Dreame segment "${target.segmentId}" for Matter area ${areaId} is not numeric`);
       }
     }
-    this.log.debug(`Resolved Matter ServiceArea selection to Dreame segment(s): [${roomIds.join(', ')}]`);
-    await this.handleRoomSelection(roomIds);
+    this.assertAreasShareMap(areas);
+    this.pendingAreas = areas.length > 0 ? [...areas] : null;
+    this.notifyAreaSelectionChanged(areaIds);
+    this.log.debug(
+      areas.length > 0
+        ? `Area selection set for next start: ${areas.map((area) => `map:${area.mapId ?? 'unknown'}/segment:${area.segmentId}`).join(', ')}`
+        : 'Area selection cleared — next start will auto-clean.',
+    );
   }
 
+  public async handleSkipArea(areaId: number | undefined): Promise<void> {
+    const target = areaId === undefined ? undefined : this.areaIdToRoomTargetMap.get(areaId);
+    const description = target
+      ? `map:${target.mapId ?? 'unknown'}/segment:${target.segmentId}`
+      : `Matter area ${areaId ?? 'unknown'}`;
+    this.log.warn(`Cannot skip ${description}: Dreame does not expose a safe command to skip only the active room`);
+    throw new Error('Skipping an active room is not supported by the Dreame API');
+  }
+
+  /** Convenience entry point for room IDs when no Matter map metadata is available. */
   public async handleRoomSelection(roomIds: number[]): Promise<void> {
-    this.pendingRoomIds = roomIds.length > 0 ? [...roomIds] : null;
-    try {
-      this.onRoomSelectionChanged?.(roomIds.map(String));
-    } catch (err: unknown) {
-      this.log.warn(`Failed to apply room selection to accessory state: ${err instanceof Error ? err.message : String(err)}`);
-    }
+    this.pendingAreas = roomIds.length > 0
+      ? roomIds.map((segmentId) => ({ areaId: segmentId, mapId: null, segmentId: String(segmentId) }))
+      : null;
+    this.notifyAreaSelectionChanged(roomIds);
     this.log.debug(
       roomIds.length > 0
         ? `Room selection set for next start: [${roomIds.join(', ')}]`
         : 'Room selection cleared — next start will auto-clean.',
     );
+  }
+
+  private notifyAreaSelectionChanged(areaIds: number[]): void {
+    try {
+      this.onAreaSelectionChanged?.(areaIds.map(String));
+    } catch (err: unknown) {
+      this.log.warn(`Failed to apply area selection to accessory state: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  private assertAreasShareMap(areas: DreameAreaTarget[]): void {
+    const mapIds = new Set(areas.map((area) => area.mapId).filter((mapId): mapId is number => mapId !== null));
+    if (mapIds.size > 1) {
+      throw new Error(`Dreame cannot clean rooms from multiple maps in one task: [${[...mapIds].join(', ')}]`);
+    }
+  }
+
+  private assertAreasBelongToCurrentMap(areas: DreameAreaTarget[]): void {
+    this.assertAreasShareMap(areas);
+    const targetMapId = areas.find((area) => area.mapId !== null)?.mapId;
+    if (targetMapId !== undefined && targetMapId !== null && this.currentMapId !== undefined && targetMapId !== this.currentMapId) {
+      throw new Error(`Selected rooms belong to Dreame map ${targetMapId}, but current map is ${this.currentMapId}`);
+    }
   }
 
   /** Returns current suction level (used in room clean params). Default: 1 (Standard). */

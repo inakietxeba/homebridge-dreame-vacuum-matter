@@ -162,8 +162,8 @@ export class DreameVacuumMatterPlatform implements DynamicPlatformPlugin {
       handlers.setOnCleanModeSelected((mode) => {
         accessoryHandler?.applyUserCleanMode(mode);
       });
-      handlers.setOnRoomSelectionChanged((roomIds) => {
-        accessoryHandler?.applyUserRoomSelection(roomIds);
+      handlers.setOnAreaSelectionChanged((areaIds) => {
+        accessoryHandler?.applyUserRoomSelection(areaIds);
       });
 
       const firmware = cloud.getDeviceFirmware(deviceId) ?? '1.0';
@@ -179,20 +179,18 @@ export class DreameVacuumMatterPlatform implements DynamicPlatformPlugin {
           initialState.activity.availableRooms = knownMaps[0]?.rooms ?? [];
           const roomCount = knownMaps.reduce((total, map) => total + map.rooms.length, 0);
           this.log.info(`Loaded ${roomCount} room segment(s) from ${knownMaps.length} Dreame map(s) for ${deviceName}`);
-          const suggestedRoomConfig = {
-            mapOverrides: knownMaps.map((map) => ({
-              deviceId,
-              mapId: map.mapId,
-              name: map.name || `Map ${map.mapId}`,
-              rooms: map.rooms.map((room) => ({
-                segmentId: room.id,
-                name: room.name || `Room ${room.id}`,
-              })),
+          const suggestedMapOverrides = knownMaps.map((map) => ({
+            deviceId,
+            mapId: map.mapId,
+            name: map.name || `Map ${map.mapId}`,
+            rooms: map.rooms.map((room) => ({
+              segmentId: room.id,
+              name: room.name || `Room ${room.id}`,
             })),
-          };
+          }));
           this.log.info(
             `Suggested room naming config for ${deviceName} (copy and edit names if needed): `
-            + JSON.stringify(suggestedRoomConfig),
+            + `"mapOverrides":${JSON.stringify(suggestedMapOverrides)}`,
           );
         } else {
           this.log.debug(`No room segments loaded from Dreame maps for ${deviceName}`);
@@ -241,7 +239,8 @@ export class DreameVacuumMatterPlatform implements DynamicPlatformPlugin {
         this.log.warn(`Failed to fetch initial state for ${deviceName}, using defaults: ${err instanceof Error ? err.message : String(err)}`);
       }
 
-      handlers.setAreaIdToRoomIdMap(MatterClusterMapper.buildAreaIdToRoomIdMap(initialState));
+      handlers.setAreaIdToRoomTargetMap(MatterClusterMapper.buildAreaIdToRoomTargetMap(initialState));
+      handlers.syncCurrentMapId(initialState.activity.currentMapId);
 
       // Check if this device was cached
       const cachedAccessory = this.matterAccessories.get(uuid);

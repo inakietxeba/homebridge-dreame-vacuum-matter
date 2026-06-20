@@ -19,6 +19,12 @@ export interface SupportedMap {
   name: string;
 }
 
+export interface DreameAreaTarget {
+  areaId: number;
+  mapId: number | null;
+  segmentId: string;
+}
+
 export interface ServiceAreaPayload {
   supportedMaps: SupportedMap[];
   supportedAreas: SupportedArea[];
@@ -70,6 +76,7 @@ export class MatterClusterMapper {
 
     let supportedMaps: SupportedMap[] = [];
     let supportedAreas: SupportedArea[] = [];
+    const areaTargets: DreameAreaTarget[] = [];
 
     if (useMapMode) {
       supportedMaps = mapsWithRooms.map((m, index) => ({
@@ -95,6 +102,7 @@ export class MatterClusterMapper {
               landmarkInfo: null,
             },
           });
+          areaTargets.push({ areaId, mapId: map.mapId, segmentId: room.id });
           globalIndex += 1;
         }
       }
@@ -106,6 +114,7 @@ export class MatterClusterMapper {
       supportedAreas = rooms.map((room, index) => {
         const areaId = getStableAreaId(room.id, index, usedAreaIds);
         const trimmedName = (room.name ?? '').trim();
+        areaTargets.push({ areaId, mapId: null, segmentId: room.id });
         return {
           areaId,
           mapId: null,
@@ -123,11 +132,19 @@ export class MatterClusterMapper {
 
     if (supportedAreas.length === 0) return undefined;
 
-    const validAreaIds = new Set(supportedAreas.map((a) => a.areaId));
     const selectedSource = Array.isArray(state.activity.selectedRooms) ? state.activity.selectedRooms : [];
     const selectedAreas = selectedSource
-      .map((roomId) => Number.parseInt(roomId, 10))
-      .filter((areaId) => Number.isFinite(areaId) && validAreaIds.has(areaId));
+      .map((segmentId) => {
+        const candidates = areaTargets.filter((target) => target.segmentId === segmentId);
+        if (!useMapMode) return candidates[0]?.areaId;
+
+        const currentMapTarget = candidates.find((target) => target.mapId === state.activity.currentMapId);
+        if (currentMapTarget) return currentMapTarget.areaId;
+
+        // Without an active map, only expose selections whose segment ID is unambiguous.
+        return candidates.length === 1 ? candidates[0]?.areaId : undefined;
+      })
+      .filter((areaId): areaId is number => areaId !== undefined);
 
     // currentArea: the first selected room being actively cleaned, or null
     const currentArea = (state.activity.runMode === 'cleaning' && selectedAreas.length > 0)
@@ -171,35 +188,38 @@ export class MatterClusterMapper {
     return result;
   }
 
-  /**
-   * Builds a reverse mapping from Matter areaId → Dreame room ID string.
-   * Used by selectAreas handler to convert Matter area selections to device commands.
-   */
-  public static buildAreaIdToRoomIdMap(state: NormalizedState): Map<number, string> {
-    const result = new Map<number, string>();
+  /** Builds a reverse mapping from Matter areaId to its Dreame map and segment. */
+  public static buildAreaIdToRoomTargetMap(state: NormalizedState): Map<number, DreameAreaTarget> {
+    const result = new Map<number, DreameAreaTarget>();
     const serviceArea = MatterClusterMapper.buildServiceArea(state);
     if (!serviceArea) return result;
 
-    // Collect all room sources
     const knownMaps = state.activity.knownMaps ?? [];
     const mapsWithRooms = knownMaps
       .map((m) => ({ ...m, rooms: MatterClusterMapper.normalizeRooms(m.rooms) }))
       .filter((m) => m.rooms.length > 0);
 
-    const allRooms: RoomInfo[] = mapsWithRooms.length > 0
-      ? mapsWithRooms.flatMap((m) => m.rooms)
-      : MatterClusterMapper.normalizeRooms(state.activity.availableRooms);
+    const roomTargets = mapsWithRooms.length > 0
+      ? mapsWithRooms.flatMap((map) => map.rooms.map((room) => ({ mapId: map.mapId, room })))
+      : MatterClusterMapper.normalizeRooms(state.activity.availableRooms).map((room) => ({ mapId: null, room }));
 
-    // Map each areaId back to its room ID
     let globalIndex = 0;
     const usedAreaIds = new Set<number>();
-    for (const room of allRooms) {
+    for (const { mapId, room } of roomTargets) {
       const areaId = getStableAreaId(room.id, globalIndex, usedAreaIds);
-      result.set(areaId, room.id);
+      result.set(areaId, { areaId, mapId, segmentId: room.id });
       globalIndex += 1;
     }
 
     return result;
+  }
+
+  /** Compatibility helper for consumers that only need the Dreame segment ID. */
+  public static buildAreaIdToRoomIdMap(state: NormalizedState): Map<number, string> {
+    return new Map(
+      [...MatterClusterMapper.buildAreaIdToRoomTargetMap(state)]
+        .map(([areaId, target]) => [areaId, target.segmentId]),
+    );
   }
 
   private static normalizeRooms(value: RoomInfo[] | undefined): RoomInfo[] {
