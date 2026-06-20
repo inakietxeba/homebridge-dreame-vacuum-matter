@@ -185,6 +185,33 @@ describe('DreameVacuumAccessory', () => {
     });
   });
 
+  describe('commanded state sync', () => {
+    it('should publish returning-home state after a classic dock command', async () => {
+      const updateFn = vi.fn().mockResolvedValue(undefined);
+      const accessory = new DreameVacuumAccessory(
+        createMockLogger(), 'test-uuid-123', createInitialState(identity), createMockApi(updateFn),
+      );
+      accessory.markRegistered();
+      await drainInitialRegistrationSync();
+      updateFn.mockClear();
+
+      accessory.applyUserReturnToDock();
+      await vi.advanceTimersByTimeAsync(100);
+
+      expect(accessory.getCurrentState().activity.runMode).toBe('returning');
+      expect(updateFn).toHaveBeenCalledWith(
+        'test-uuid-123',
+        'rvcRunMode',
+        expect.objectContaining({ currentMode: 0x02 }),
+      );
+      expect(updateFn).toHaveBeenCalledWith(
+        'test-uuid-123',
+        'rvcOperationalState',
+        expect.objectContaining({ operationalState: 0x40 }),
+      );
+    });
+  });
+
   describe('parallel cluster pushes', () => {
     it('should push all clusters in parallel', async () => {
       const callOrder: string[] = [];

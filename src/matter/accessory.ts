@@ -116,6 +116,15 @@ export class DreameVacuumAccessory {
     this.requestSync();
   }
 
+  public applyUserReturnToDock(): void {
+    this.currentState.activity.runMode = 'returning';
+    this.currentState.activity.paused = false;
+    this.currentState.activity.maintenanceType = undefined;
+    this.currentState.power.docked = false;
+    this.currentState.power.charging = false;
+    this.requestSync();
+  }
+
   /**
    * Request a debounced state sync to Matter. Coalesces rapid updates
    * (e.g. multiple MQTT properties arriving within 100ms) into a single push.

@@ -273,9 +273,6 @@ export class DreameVacuumMatterPlatform implements DynamicPlatformPlugin {
       const automationSensors = this.config.automationContactSensors
         ? this.setupAutomationSensors(deviceName, deviceId, deviceModel, initialState)
         : undefined;
-      if (this.config.automationDockSwitch) {
-        this.setupAutomationDockSwitch(deviceName, deviceId, deviceModel, handlers);
-      }
 
       // Create accessory handler for state push
       accessoryHandler = new DreameVacuumAccessory(this.log.getRaw(), uuid, initialState, this.api, {
@@ -284,6 +281,9 @@ export class DreameVacuumMatterPlatform implements DynamicPlatformPlugin {
       accessoryHandler.markRegistered();
       this.accessoryHandlers.set(uuid, accessoryHandler);
       this.commandHandlers.set(uuid, handlers);
+      if (this.config.automationDockSwitch) {
+        this.setupAutomationDockSwitch(deviceName, deviceId, deviceModel, handlers, accessoryHandler);
+      }
 
       // Create device session with MQTT
       const session = new DeviceSession(
@@ -375,6 +375,7 @@ export class DreameVacuumMatterPlatform implements DynamicPlatformPlugin {
     deviceId: string,
     model: string,
     handlers: MatterCommandHandlers,
+    accessoryHandler: DreameVacuumAccessory,
   ): void {
     const uuid = this.getAutomationDockSwitchUuid(deviceId);
     const name = `${deviceName} Return to Dock`;
@@ -399,7 +400,10 @@ export class DreameVacuumMatterPlatform implements DynamicPlatformPlugin {
       deviceName,
       deviceId,
       model,
-      () => handlers.handleGoHomeCommand(),
+      async () => {
+        await handlers.handleGoHomeCommand();
+        accessoryHandler.applyUserReturnToDock();
+      },
     );
   }
 
