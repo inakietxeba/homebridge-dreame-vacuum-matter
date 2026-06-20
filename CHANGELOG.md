@@ -2,9 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## 1.0.4
 
 - Fixed the Dreame service/action IDs used by Matter start, pause, and resume commands.
+- Scoped action IDs to their MIoT services to prevent invalid service/action combinations.
 
 ## 1.0.3
 
