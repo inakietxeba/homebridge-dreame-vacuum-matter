@@ -45,6 +45,14 @@ function buildHandlers(
   // Use cluster name constants per wiki best practice #7
   const cn = matter.clusterNames;
 
+  const updateRunAndOperationalState = async (runMode: number, operationalState: number): Promise<void> => {
+    if (!matter.updateAccessoryState) return;
+    await Promise.all([
+      matter.updateAccessoryState(uuid, cn?.RvcRunMode ?? 'rvcRunMode', { currentMode: runMode }),
+      matter.updateAccessoryState(uuid, cn?.RvcOperationalState ?? 'rvcOperationalState', { operationalState }),
+    ]);
+  };
+
   return {
     identify: {
       identify: wrapHandler('identify.identify', async () => {
@@ -59,11 +67,15 @@ function buildHandlers(
           case 0x02: await handlers.handleGoHomeCommand(); break;
           default: log.warn(`Unknown rvcRunMode: ${request?.newMode}`); return;
         }
-        // Command handler — MUST manually update state (wiki best practice #4)
-        if (matter.updateAccessoryState && request?.newMode !== undefined) {
-          await matter.updateAccessoryState(uuid, cn?.RvcRunMode ?? 'rvcRunMode', {
-            currentMode: request.newMode,
-          });
+        // Command handlers must update both clusters immediately. Otherwise
+        // controllers can show "Ready" while the robot is already cleaning.
+        if (request?.newMode !== undefined) {
+          const operationalState = request.newMode === 0x00
+            ? 0x00 // Stopped
+            : request.newMode === 0x01
+              ? 0x01 // Running
+              : 0x40; // Seeking charger
+          await updateRunAndOperationalState(request.newMode, operationalState);
         }
       }),
     },
@@ -79,19 +91,11 @@ function buildHandlers(
       }),
       resume: wrapHandler('rvcOperationalState.resume', async () => {
         await handlers.handleResumeCommand();
-        if (matter.updateAccessoryState) {
-          await matter.updateAccessoryState(uuid, cn?.RvcOperationalState ?? 'rvcOperationalState', {
-            operationalState: 1, // Running
-          });
-        }
+        await updateRunAndOperationalState(0x01, 0x01);
       }),
       goHome: wrapHandler('rvcOperationalState.goHome', async () => {
         await handlers.handleGoHomeCommand();
-        if (matter.updateAccessoryState) {
-          await matter.updateAccessoryState(uuid, cn?.RvcOperationalState ?? 'rvcOperationalState', {
-            operationalState: 0, // Stopped (returning to dock)
-          });
-        }
+        await updateRunAndOperationalState(0x02, 0x40);
       }),
     },
     rvcCleanMode: {
