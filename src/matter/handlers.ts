@@ -219,9 +219,11 @@ export class MatterCommandHandlers {
   }
 
   public async handleGoHomeCommand(): Promise<void> {
-    this.log.info('Handling Matter Go Home Command...');
+    this.log.info('Handling Go Home Command...');
     this.suppressPauseForCommandSequence();
-    await this.requireCloud().action(this.deviceId, MIOT.CHARGE.siid, MIOT.ACTION.DOCK);
+    const result = await this.requireCloud().action(this.deviceId, MIOT.CHARGE.siid, MIOT.ACTION.DOCK);
+    this.assertDreameActionSucceeded('DOCK', result);
+    this.log.debug('DOCK sent successfully');
   }
 
   public async handleLocateCommand(): Promise<void> {

@@ -94,7 +94,13 @@ describe('MatterCommandHandlers', () => {
   describe('handleGoHomeCommand', () => {
     it('should send DOCK action on charge service', async () => {
       await handlers.handleGoHomeCommand();
-      expect(cloud.action).toHaveBeenCalledWith('dev-1', MIOT.CHARGE.siid, MIOT.ACTION.DOCK);
+      expect(cloud.action).toHaveBeenCalledWith('dev-1', 3, 1);
+    });
+
+    it('should reject a failed DOCK response', async () => {
+      cloud.action.mockResolvedValueOnce({ code: -1 });
+
+      await expect(handlers.handleGoHomeCommand()).rejects.toThrow('DOCK returned Dreame code -1');
     });
 
     it('should suppress pause', async () => {

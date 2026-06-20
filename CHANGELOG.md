@@ -5,6 +5,7 @@ All notable changes to this project will be documented in this file.
 ## 1.0.2
 
 - Added an optional momentary HomeKit switch for return-to-dock actions in classic automations.
+- Fixed the Dreame charging-service ID used by return-to-dock commands.
 - Reset the automation switch to off after both successful and failed dock commands.
 - Added automatic registration and cleanup of the optional switch when its setting changes.
 

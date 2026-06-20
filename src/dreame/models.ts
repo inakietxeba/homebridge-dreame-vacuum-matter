@@ -52,8 +52,8 @@ export const MIOT = {
   },
   /** siid 15 — Dock capabilities. */
   DOCK: { siid: 15, DUST_COLLECTION: 3 },
-  /** siid 6 — Charge service. */
-  CHARGE: { siid: 6 },
+  /** siid 3 — Battery and charging service. */
+  CHARGE: { siid: 3 },
   /** siid 6 — Map service. Names follow HA's Dreame mapping for map objects. */
   MAP: { siid: 6, MAP_DATA: 1, FRAME_INFO: 2, OBJECT_NAME: 3, MAP_LIST: 8, RECOVERY_MAP_LIST: 9 },
   /** siid 7 — Find device service. Not present on every Dreame model. */
