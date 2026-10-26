@@ -5,8 +5,8 @@ import type {
 
 import { isDeepStrictEqual } from 'node:util';
 
-import { CleaningMode } from '../config.js';
-import { NormalizedState } from '../dreame/models.js';
+import { CleaningMode, CleaningProfile } from '../config.js';
+import { MapRooms, NormalizedState } from '../dreame/models.js';
 import { MatterClusterMapper, MatterState } from './clusters.js';
 import { Logger } from '../util/logger.js';
 
@@ -39,6 +39,7 @@ export class DreameVacuumAccessory {
   private readonly platformLogger: Logger;
   private matterStatePushEnabled: boolean;
   private isRegistered = false;
+  private disposed = false;
   private syncInFlight = false;
   private pendingSync = false;
   private syncRetryTimer: ReturnType<typeof setTimeout> | undefined;
@@ -73,7 +74,7 @@ export class DreameVacuumAccessory {
   }
 
   public markRegistered(): void {
-    if (this.isRegistered) return;
+    if (this.isRegistered || this.disposed) return;
     this.isRegistered = true;
     this.platformLogger.debug(`Matter accessory ${this.uuid} marked registered`);
     this.registrationSyncTimer = setTimeout(() => {
@@ -100,19 +101,38 @@ export class DreameVacuumAccessory {
   }
 
   public onStateUpdate(newState: NormalizedState): void {
+    if (this.disposed) return;
     this.currentState = newState;
     this.requestSync();
   }
 
   public applyUserCleanMode(mode: CleaningMode): void {
-    if (this.currentState.activity.cleanMode === mode) return;
+    if (this.currentState.activity.cleanMode === mode && !this.currentState.activity.cleaningProfile) return;
     this.currentState.activity.cleanMode = mode;
+    this.currentState.activity.cleaningProfile = undefined;
+    this.currentState.activity.cleanGeniusMode = this.currentState.activity.cleanGeniusMode === undefined ? undefined : 0;
+    this.requestSync();
+  }
+
+  public applyUserCleaningProfile(profile: CleaningProfile, mode: CleaningMode = 'SWEEP'): void {
+    this.currentState.activity.cleaningProfile = profile;
+    if (profile === 'AUTO') {
+      this.currentState.activity.cleanGeniusMode = this.currentState.capabilities.cleanGenius === false ? 0 : 1;
+      this.currentState.activity.cleanMode = 'SWEEP_AND_MOP';
+    } else {
+      this.currentState.activity.cleanGeniusMode = this.currentState.activity.cleanGeniusMode === undefined ? undefined : 0;
+      this.currentState.activity.cleanMode = mode;
+      this.currentState.activity.suctionLevel = profile === 'QUIET' ? 0 : 1;
+    }
     this.requestSync();
   }
 
   public applyUserRoomSelection(roomIds: string[]): void {
-    if (isDeepStrictEqual(this.currentState.activity.selectedRooms, roomIds)) return;
-    this.currentState.activity.selectedRooms = [...roomIds];
+    const areaIds = roomIds.map(Number);
+    if (isDeepStrictEqual(this.currentState.activity.selectedAreaIds, areaIds)) return;
+    const targets = MatterClusterMapper.buildAreaIdToRoomTargetMap(this.currentState);
+    this.currentState.activity.selectedAreaIds = areaIds;
+    this.currentState.activity.selectedRooms = areaIds.map((id) => targets.get(id)?.segmentId ?? String(id));
     this.requestSync();
   }
 
@@ -125,11 +145,20 @@ export class DreameVacuumAccessory {
     this.requestSync();
   }
 
+  public applyMapState(maps: MapRooms[], currentMapId: number | undefined): void {
+    if (this.disposed) return;
+    this.currentState.activity.knownMaps = maps;
+    this.currentState.activity.currentMapId = currentMapId;
+    this.currentState.activity.availableRooms = maps.find((map) => map.mapId === currentMapId)?.rooms ?? [];
+    this.requestSync();
+  }
+
   /**
    * Request a debounced state sync to Matter. Coalesces rapid updates
    * (e.g. multiple MQTT properties arriving within 100ms) into a single push.
    */
   private requestSync(): void {
+    if (this.disposed) return;
     this.pendingSync = true;
     if (this.syncInFlight) return;
     if (this.syncDebounceTimer) return;
@@ -228,6 +257,7 @@ export class DreameVacuumAccessory {
           .filter(([, payload]) => payload !== undefined)
           .map(([key, payload]) => pushOne(key, payload)),
       );
+      if (this.disposed) return;
 
       // Process results
       const anySucceeded = results.some((r) => r.kind === 'pushed');
@@ -299,6 +329,12 @@ export class DreameVacuumAccessory {
         this.consecutiveSessionErrors = 0;
       }
 
+      if (results.some((r) => r.kind === 'failed')) {
+        this.scheduleSyncRetry(this.syncRetryDelayMs);
+        this.syncRetryDelayMs = Math.min(30_000, this.syncRetryDelayMs * 2);
+        return;
+      }
+
       if (anySucceeded) {
         this.lastSyncedMatterState = structuredClone(matterState);
         this.syncRetryAttempts = 0;
@@ -316,7 +352,7 @@ export class DreameVacuumAccessory {
   }
 
   private scheduleSyncRetry(delayMs: number): void {
-    if (this.syncRetryTimer) return;
+    if (this.disposed || this.syncRetryTimer) return;
     this.syncRetryTimer = setTimeout(() => {
       this.syncRetryTimer = undefined;
       this.requestSync();
@@ -324,7 +360,7 @@ export class DreameVacuumAccessory {
   }
 
   private scheduleSessionRecovery(): void {
-    if (this.sessionRecoveryTimer) return;
+    if (this.disposed || this.sessionRecoveryTimer) return;
     this.sessionRecoveryTimer = setTimeout(() => {
       this.sessionRecoveryTimer = undefined;
       this.matterStatePushEnabled = true;
@@ -338,6 +374,9 @@ export class DreameVacuumAccessory {
   }
 
   public dispose(): void {
+    this.disposed = true;
+    this.isRegistered = false;
+    this.pendingSync = false;
     if (this.syncRetryTimer) clearTimeout(this.syncRetryTimer);
     if (this.registrationSyncTimer) clearTimeout(this.registrationSyncTimer);
     if (this.syncDebounceTimer) clearTimeout(this.syncDebounceTimer);

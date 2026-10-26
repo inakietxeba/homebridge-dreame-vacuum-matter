@@ -1,9 +1,10 @@
 import { DreameCloud } from '../dreame/cloud.js';
 import { Logger } from '../util/logger.js';
-import { CleaningMode } from '../config.js';
+import { CleaningMode, CleaningProfile } from '../config.js';
 import { DREAME_STATUS, MIOT, SuctionLevel, WaterLevel } from '../dreame/models.js';
 import { DreameCleaningModeCodec } from '../dreame/cleaning-mode.js';
 import { DreameAreaTarget } from './clusters.js';
+import { DreameCapabilities } from '../dreame/capabilities.js';
 
 class TemporalSuppression {
   private until = 0;
@@ -18,14 +19,18 @@ class TemporalSuppression {
 }
 
 export class MatterCommandHandlers {
-  private readonly pauseSuppression = new TemporalSuppression();
   private currentCleanMode: CleaningMode;
+  private currentCleaningProfile?: CleaningProfile;
+  private onCleaningProfileSelected?: (profile: CleaningProfile, mode: CleaningMode) => void;
   private readonly modeSuppression = new TemporalSuppression();
   private onCleanModeSelected?: (mode: CleaningMode) => void;
   private onAreaSelectionChanged?: (areaIds: string[]) => void;
   private pendingAreas: DreameAreaTarget[] | null = null;
   private areaIdToRoomTargetMap = new Map<number, DreameAreaTarget>();
   private currentMapId: number | undefined;
+  private mapStateProvider?: () => Promise<number | undefined>;
+  private capabilities?: DreameCapabilities;
+  private cleaningSelectionExplicit = false;
 
   constructor(
     private cloud: DreameCloud | null,
@@ -46,6 +51,10 @@ export class MatterCommandHandlers {
     this.cleaningModeCodec = codec;
   }
 
+  public syncCapabilities(capabilities: DreameCapabilities): void {
+    this.capabilities = { ...capabilities };
+  }
+
   private requireCloud(): DreameCloud {
     if (!this.cloud) throw new Error('Cloud connection not available yet');
     return this.cloud;
@@ -53,6 +62,15 @@ export class MatterCommandHandlers {
 
   public setOnCleanModeSelected(callback: (mode: CleaningMode) => void): void {
     this.onCleanModeSelected = callback;
+  }
+
+  public setOnCleaningProfileSelected(callback: (profile: CleaningProfile, mode: CleaningMode) => void): void {
+    this.onCleaningProfileSelected = callback;
+  }
+
+  public resolveCleaningProfileForState(candidate: CleaningProfile | undefined): CleaningProfile | undefined {
+    if (!this.modeSuppression.isActive) this.currentCleaningProfile = candidate;
+    return this.currentCleaningProfile;
   }
 
   public setOnAreaSelectionChanged(callback: (areaIds: string[]) => void): void {
@@ -74,33 +92,41 @@ export class MatterCommandHandlers {
     this.currentMapId = mapId;
   }
 
+  public setMapStateProvider(provider: () => Promise<number | undefined>): void {
+    this.mapStateProvider = provider;
+  }
+
   public isCleanModeSuppressionActive(): boolean {
     return this.modeSuppression.isActive;
   }
 
   public resolveCleanModeForState(candidate: CleaningMode): CleaningMode {
+    if (this.currentCleaningProfile === 'AUTO') return candidate;
     return this.isCleanModeSuppressionActive() ? this.currentCleanMode : candidate;
   }
 
   public async handleStartCommand(isPaused = false): Promise<void> {
     this.log.info('Handling Matter Start Command...');
-    this.suppressPauseForCommandSequence();
 
     if (isPaused) {
       this.log.debug('Robot is paused — sending START');
+      await this.handleResumeCommand();
+      return;
     }
 
-    // Segment jobs use the settings stored for each room when customized cleaning is enabled.
     const areasToClean = this.pendingAreas;
     if (areasToClean && areasToClean.length > 0) {
-      this.assertAreasBelongToCurrentMap(areasToClean);
+      await this.ensureAreasMapActive(areasToClean);
+      await this.prepareCleaningTask();
+      // Segment payloads carry suction and water levels, but not the cleaning mode.
+      this.modeSuppression.suppress(10_000);
       const segmentIds = areasToClean.map((area) => Number.parseInt(area.segmentId, 10));
-      const selects = segmentIds.map((segmentId) => [
+      const selects = segmentIds.map((segmentId, index) => [
         segmentId,
         1, // repeat count
         this.getCurrentSuctionLevel(),
         this.getCurrentWaterLevel(),
-        1, // HA uses 1 for customized cleaning; sequence values break some newer models
+        this.capabilities?.customizedCleaningSupported === false && this.capabilities.gen5 === false ? index + 1 : 1,
       ]);
       const payload = { selects };
       const targetMapId = areasToClean[0]?.mapId ?? null;
@@ -120,7 +146,7 @@ export class MatterCommandHandlers {
       return;
     }
 
-    await this.setCleaningMode(this.currentCleanMode);
+    await this.prepareCleaningTask();
     this.modeSuppression.suppress(10_000);
     const result = await this.requireCloud().action(this.deviceId, MIOT.STATE.siid, MIOT.STATE.START);
     this.assertDreameActionSucceeded('START', result);
@@ -189,9 +215,25 @@ export class MatterCommandHandlers {
     }
   }
 
-  private assertAreasBelongToCurrentMap(areas: DreameAreaTarget[]): void {
+  private async ensureAreasMapActive(areas: DreameAreaTarget[]): Promise<void> {
     this.assertAreasShareMap(areas);
     const targetMapId = areas.find((area) => area.mapId !== null)?.mapId;
+    if (targetMapId === undefined || targetMapId === null) return;
+    if (this.mapStateProvider) {
+      this.currentMapId = await this.mapStateProvider();
+      if (this.currentMapId === targetMapId) return;
+      this.log.info(`Selecting Dreame map ${targetMapId} before room cleaning`);
+      const result = await this.requireCloud().action(this.deviceId, MIOT.MAP.siid, MIOT.MAP.UPDATE_MAP_DATA, [
+        { piid: MIOT.MAP.MAP_EXTEND_DATA, value: JSON.stringify({ sm: {}, mapid: targetMapId }) },
+      ]);
+      this.assertDreameActionSucceeded('SELECT_MAP', result);
+      for (let attempt = 0; attempt < 5; attempt++) {
+        if (attempt > 0) await new Promise((resolve) => setTimeout(resolve, 500));
+        this.currentMapId = await this.mapStateProvider();
+        if (this.currentMapId === targetMapId) return;
+      }
+      throw new Error(`Dreame map ${targetMapId} was not confirmed active; room cleaning was not started`);
+    }
     if (targetMapId !== undefined && targetMapId !== null && this.currentMapId !== undefined && targetMapId !== this.currentMapId) {
       throw new Error(`Selected rooms belong to Dreame map ${targetMapId}, but current map is ${this.currentMapId}`);
     }
@@ -211,20 +253,17 @@ export class MatterCommandHandlers {
   }
 
   public async handlePauseCommand(): Promise<void> {
-    if (this.pauseSuppression.isActive) return;
     const result = await this.requireCloud().action(this.deviceId, MIOT.STATE.siid, MIOT.STATE.PAUSE);
     this.assertDreameActionSucceeded('PAUSE', result);
   }
 
   public async handleResumeCommand(): Promise<void> {
-    this.suppressPauseForCommandSequence();
     const result = await this.requireCloud().action(this.deviceId, MIOT.STATE.siid, MIOT.STATE.START);
     this.assertDreameActionSucceeded('START', result);
   }
 
   public async handleGoHomeCommand(): Promise<void> {
     this.log.info('Handling Go Home Command...');
-    this.suppressPauseForCommandSequence();
     const result = await this.requireCloud().action(this.deviceId, MIOT.CHARGE.siid, MIOT.CHARGE.DOCK);
     this.assertDreameActionSucceeded('DOCK', result);
     this.log.debug('DOCK sent successfully');
@@ -242,6 +281,10 @@ export class MatterCommandHandlers {
   }
 
   public async handleCleaningMode(mode: CleaningMode): Promise<void> {
+    await this.setCleanGenius(0);
+    await this.setCleaningMode(mode);
+    this.cleaningSelectionExplicit = true;
+    this.currentCleaningProfile = undefined;
     this.currentCleanMode = mode;
     this.modeSuppression.suppress(10_000);
     this.log.debug(`User selected cleaning mode: ${mode} — suppressing device echo for 10s`);
@@ -252,21 +295,41 @@ export class MatterCommandHandlers {
       this.log.warn(`onCleanModeSelected callback threw: ${error instanceof Error ? error.message : String(error)}`);
     }
 
-    await this.setCleaningMode(mode);
+  }
+
+  public async handleCleaningProfile(profile: CleaningProfile, mode: CleaningMode = 'SWEEP'): Promise<void> {
+    if (profile === 'AUTO') {
+      if (this.capabilities?.cleanGenius === false) {
+        await this.setCleaningMode('SWEEP_AND_MOP');
+        await this.handleSuctionLevel(1);
+      } else await this.setCleanGenius(1);
+      this.currentCleanMode = 'SWEEP_AND_MOP';
+    } else {
+      await this.setCleanGenius(0);
+      await this.setCleaningMode(mode);
+      await this.handleSuctionLevel(profile === 'QUIET' ? 0 : 1);
+      this.currentCleanMode = mode;
+    }
+    this.currentCleaningProfile = profile;
+    this.cleaningSelectionExplicit = true;
+    this.modeSuppression.suppress(10_000);
+    this.onCleaningProfileSelected?.(profile, this.currentCleanMode);
   }
 
   public async handleSuctionLevel(level: 0 | 1 | 2 | 3): Promise<void> {
-    this._suctionLevel = level;
-    await this.requireCloud().setProperties(this.deviceId, [
+    const result = await this.requireCloud().setProperties(this.deviceId, [
       { did: this.deviceId, siid: MIOT.VACUUM.siid, piid: MIOT.VACUUM.SUCTION, value: level },
     ]);
+    this.assertPropertyWriteSucceeded('SUCTION', result);
+    this._suctionLevel = level;
   }
 
   public async handleWaterLevel(level: 1 | 2 | 3): Promise<void> {
-    this._waterLevel = level;
-    await this.requireCloud().setProperties(this.deviceId, [
+    const result = await this.requireCloud().setProperties(this.deviceId, [
       { did: this.deviceId, siid: MIOT.VACUUM.siid, piid: MIOT.VACUUM.WATER, value: level },
     ]);
+    this.assertPropertyWriteSucceeded('WATER', result);
+    this._waterLevel = level;
   }
 
   public syncCleanModeFromDevice(mode: CleaningMode): void {
@@ -283,26 +346,100 @@ export class MatterCommandHandlers {
     this._waterLevel = waterLevel;
   }
 
-  private suppressPauseForCommandSequence(durationMs = 8000): void {
-    this.pauseSuppression.suppress(durationMs);
-  }
-
   private async setCleaningMode(mode: CleaningMode): Promise<void> {
+    if (this.capabilities?.cleaningModeSupported === false) {
+      throw new Error('Changing cleaning mode is not supported by this robot');
+    }
+    const tank = this.capabilities?.waterTankInstalled;
+    if (tank === false && mode !== 'SWEEP') throw new Error('Install the water tank or mop before selecting mopping');
+    if (tank === true && mode === 'SWEEP' && this.capabilities?.liftingMopPads === false) {
+      throw new Error('Remove the water tank or mop before selecting vacuum-only on this robot');
+    }
     const rawValue = this.cleaningModeCodec.encode(mode);
     this.log.debug(
       `Setting Dreame cleaning mode ${mode}: raw 4.23=${rawValue}`
       + ` (${this.cleaningModeCodec.usesLiftingMopEncoding ? 'lifting-mop encoding' : 'standard encoding'})`,
     );
-    await this.requireCloud().setProperties(this.deviceId, [
+    const result = await this.requireCloud().setProperties(this.deviceId, [
       { did: this.deviceId, siid: MIOT.VACUUM.siid, piid: MIOT.VACUUM.CLEAN_MODE, value: rawValue },
     ]);
+    this.assertPropertyWriteSucceeded('CLEAN_MODE', result);
+  }
+
+  private async readCleanGenius(): Promise<number | undefined> {
+    const properties = await this.requireCloud().getProperties(this.deviceId, [
+      { did: this.deviceId, siid: MIOT.VACUUM.siid, piid: MIOT.VACUUM.AUTO_SWITCH_SETTINGS },
+    ]);
+    const property = properties.find((entry) => entry.siid === MIOT.VACUUM.siid
+      && entry.piid === MIOT.VACUUM.AUTO_SWITCH_SETTINGS);
+    if (!property || (property.code !== undefined && property.code !== 0) || property.value === undefined) {
+      return undefined;
+    }
+    const settings: unknown = typeof property.value === 'string' ? JSON.parse(property.value) : property.value;
+    if (!Array.isArray(settings)) throw new Error('Invalid Dreame auto-switch settings');
+    const setting = settings.find((entry: unknown): entry is { k: string; v: number } =>
+      typeof entry === 'object' && entry !== null && 'k' in entry && entry.k === 'SmartHost'
+      && 'v' in entry && typeof entry.v === 'number');
+    return setting?.v;
+  }
+
+  private async prepareCleaningTask(): Promise<void> {
+    // Like HA's basic Start, keep app settings unless a controller selected a mode.
+    if (this.capabilities && !this.cleaningSelectionExplicit) return;
+    if (this.currentCleaningProfile === 'AUTO' && this.capabilities?.cleanGenius !== false) {
+      await this.setCleanGenius(1);
+      return;
+    }
+    await this.setCleanGenius(0);
+    await this.setCleaningMode(this.currentCleanMode);
+    if (this.currentCleaningProfile === 'QUIET') await this.handleSuctionLevel(0);
+    if (this.currentCleaningProfile === 'NORMAL' || this.currentCleaningProfile === 'AUTO') await this.handleSuctionLevel(1);
+  }
+
+  private async setCleanGenius(value: 0 | 1): Promise<void> {
+    if (this.capabilities?.cleanGenius === false) {
+      if (value === 1) throw new Error('CleanGenius is not supported by this robot');
+      return;
+    }
+    const cleanGenius = await this.readCleanGenius();
+    if (cleanGenius === undefined) {
+      if (value === 1) throw new Error('CleanGenius is not supported by this robot');
+      return;
+    }
+    if (value === 1 ? cleanGenius > 0 : cleanGenius === 0) return;
+
+    this.log.info(value === 1 ? 'Enabling CleanGenius for Auto cleaning' : 'Disabling CleanGenius for manual cleaning');
+    const result = await this.requireCloud().setProperties(this.deviceId, [
+      {
+        did: this.deviceId,
+        siid: MIOT.VACUUM.siid,
+        piid: MIOT.VACUUM.AUTO_SWITCH_SETTINGS,
+        value: JSON.stringify({ k: 'SmartHost', v: value }),
+      },
+    ]);
+    this.assertPropertyWriteSucceeded('SmartHost', result);
+    // An accepted cloud write can precede the actual device update.
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const confirmed = await this.readCleanGenius();
+      if (confirmed !== undefined && (value === 1 ? confirmed > 0 : confirmed === 0)) return;
+      if (attempt < 4) await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+    throw new Error(value === 0 ? 'CleanGenius is still active; cleaning was not started' : 'CleanGenius activation was not confirmed');
+  }
+
+  private assertPropertyWriteSucceeded(name: string, result: unknown): void {
+    if (Array.isArray(result) && result.length === 0) throw new Error(`${name} returned an empty Dreame response`);
+    for (const entry of Array.isArray(result) ? result : [result]) {
+      this.assertDreameActionSucceeded(name, entry);
+    }
   }
 
   private assertDreameActionSucceeded(actionName: string, result: unknown): void {
-    if (!result || typeof result !== 'object') return;
+    if (!result || typeof result !== 'object') throw new Error(`${actionName} returned an invalid Dreame response`);
 
     const code = (result as { code?: unknown }).code;
-    if (typeof code === 'number' && code !== 0) {
+    if (typeof code !== 'number') throw new Error(`${actionName} returned no Dreame status code`);
+    if (code !== 0) {
       throw new Error(`${actionName} returned Dreame code ${code}`);
     }
   }

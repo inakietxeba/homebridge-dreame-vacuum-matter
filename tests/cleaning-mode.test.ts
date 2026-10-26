@@ -2,6 +2,29 @@ import { describe, expect, it } from 'vitest';
 import { DreameCleaningModeCodec } from '../src/dreame/cleaning-mode';
 
 describe('DreameCleaningModeCodec', () => {
+  it.each([true, false])('does not overwrite unknown packed settings (lifting=%s)', (lifting) => {
+    const codec = new DreameCleaningModeCodec();
+    codec.configureLiftingMopPads(lifting, true);
+    codec.configureSelfWashBase(true);
+    expect(() => codec.encode('SWEEP_AND_MOP')).toThrow('Read the packed');
+  });
+  it('keeps a known model encoding instead of guessing from a transient live state', () => {
+    const codec = new DreameCleaningModeCodec();
+    codec.configureLiftingMopPads(false, true);
+    codec.observeLiveState(12, 0);
+    expect(codec.usesLiftingMopEncoding).toBe(false);
+  });
+
+  it('preserves packed settings on a self-wash model without lifting', () => {
+    const codec = new DreameCleaningModeCodec();
+    codec.configureLiftingMopPads(false, true);
+    codec.configureSelfWashBase(true);
+    codec.configureWaterTank(true);
+    expect(codec.decode(0x140000)).toBe('SWEEP_AND_MOP');
+    expect(codec.encode('MOP')).toBe(0x140001);
+    codec.configureWaterTank(false);
+    expect(codec.decode(0x140000)).toBe('SWEEP');
+  });
   it('should use standard cleaning-mode values by default', () => {
     const codec = new DreameCleaningModeCodec();
 

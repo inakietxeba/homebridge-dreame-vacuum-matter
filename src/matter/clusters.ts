@@ -133,7 +133,9 @@ export class MatterClusterMapper {
     if (supportedAreas.length === 0) return undefined;
 
     const selectedSource = Array.isArray(state.activity.selectedRooms) ? state.activity.selectedRooms : [];
-    const selectedAreas = selectedSource
+    const selectedAreas = state.activity.selectedAreaIds !== undefined
+      ? state.activity.selectedAreaIds.filter((id) => areaTargets.some((target) => target.areaId === id))
+      : selectedSource
       .map((segmentId) => {
         const candidates = areaTargets.filter((target) => target.segmentId === segmentId);
         if (!useMapMode) return candidates[0]?.areaId;
@@ -162,7 +164,10 @@ export class MatterClusterMapper {
       },
       RvcCleanMode: {
         supportedModes: MatterMappers.getSupportedCleanModes(),
-        currentMode: MatterMappers.mapRvcCleanMode(state.activity.cleanMode),
+        currentMode: state.activity.cleaningProfile === 'AUTO' ? 2
+          : state.activity.cleaningProfile === 'QUIET'
+          && state.activity.cleanMode !== 'MOP' ? state.activity.cleanMode === 'SWEEP' ? 4 : 5
+            : MatterMappers.mapRvcCleanMode(state.activity.cleanMode),
       },
       RvcOperationalState: {
         operationalStateList: MatterMappers.getOperationalStateList(),

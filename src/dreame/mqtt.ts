@@ -15,6 +15,7 @@ export interface MqttConnectionInfo {
 export interface DreameMqttClientEvents {
   message: [properties: Array<{ siid: number; piid: number; value: unknown }>];
   connected: [];
+  disconnected: [];
   error: [error: Error];
 }
 
@@ -43,7 +44,7 @@ export class DreameMqttClient extends EventEmitter {
       this.log.debug('Updating MQTT credentials after token refresh');
       const oldClient = this.client;
       this.client = null;
-      this._connected = false;
+      this.markDisconnected();
       oldClient.removeAllListeners();
       oldClient.end(true, () => {
         this.connectInternal();
@@ -87,15 +88,17 @@ export class DreameMqttClient extends EventEmitter {
     });
 
     this.client.on('connect', () => {
-      this._connected = true;
       this.log.info('Connected to Dreame MQTT broker');
 
       const topic = `/status/${info.did}/${info.uid}/${info.model}/${info.country}/`;
       this.client!.subscribe(topic, (err) => {
         if (err) {
+          this.markDisconnected();
           this.log.error(`Failed to subscribe to ${topic}: ${err.message}`);
         } else {
           this.log.debug(`Subscribed to ${topic}`);
+          this._connected = true;
+          this.emit('connected');
         }
       });
 
@@ -104,7 +107,6 @@ export class DreameMqttClient extends EventEmitter {
         this.client!.subscribe(sgTopic);
       }
 
-      this.emit('connected');
     });
 
     this.client.on('message', (_topic, payload) => {
@@ -130,11 +132,14 @@ export class DreameMqttClient extends EventEmitter {
     });
 
     this.client.on('disconnect', () => {
-      this._connected = false;
+      this.markDisconnected();
       this.log.warn('Disconnected from MQTT broker');
     });
+    this.client.on('close', () => this.markDisconnected());
+    this.client.on('offline', () => this.markDisconnected());
 
     this.client.on('error', (err: Error & { code?: number }) => {
+      this.markDisconnected();
       this.log.error(`MQTT error: ${err.message}`);
 
       if ((err.code === 5 || err.message?.includes('Not authorized')) && !this._reconnecting) {
@@ -155,8 +160,13 @@ export class DreameMqttClient extends EventEmitter {
       this.client.removeAllListeners();
       this.client.end(true);
       this.client = null;
-      this._connected = false;
+      this.markDisconnected();
     }
+  }
+
+  private markDisconnected(): void {
+    this._connected = false;
+    this.emit('disconnected');
   }
 
   private getRandomAgentId(): string {

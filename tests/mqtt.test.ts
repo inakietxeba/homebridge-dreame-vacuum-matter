@@ -12,7 +12,7 @@ class MockMqttClient extends EventEmitter {
     cb?.();
   });
 
-  subscribe = vi.fn();
+  subscribe = vi.fn((_topic: string, cb?: (err?: Error) => void) => cb?.());
 }
 
 function createMockLogger() {
@@ -22,6 +22,25 @@ function createMockLogger() {
 describe('DreameMqttClient', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  it.each(['close', 'offline', 'disconnect', 'error'])('reports loss of updates on %s', (event) => {
+    const transport = new MockMqttClient();
+    vi.mocked(mqtt.connect).mockReturnValueOnce(transport as any);
+    const client = new DreameMqttClient(createMockLogger(), {
+      host: 'mqtt.example.com', did: 'fake', uid: 'fake', model: 'test', accessToken: 'fake', country: 'eu',
+    });
+    const disconnected = vi.fn();
+    client.on('disconnected', disconnected);
+    client.connect();
+    transport.emit('connect');
+    expect(client.connected).toBe(true);
+    transport.emit(event, new Error('network unavailable'));
+    expect(client.connected).toBe(false);
+    expect(disconnected).toHaveBeenCalled();
+    transport.emit('connect');
+    expect(client.connected).toBe(true);
+    client.disconnect();
   });
 
   it('restarts the MQTT client when token changes while reconnecting', () => {

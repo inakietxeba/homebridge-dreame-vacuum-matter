@@ -1,9 +1,47 @@
 import { describe, it, expect } from 'vitest';
 import { MatterClusterMapper } from '../src/matter/clusters';
 import { createInitialState, RoomInfo } from '../src/dreame/models';
+import { ModeUtils } from '@matter/node/behaviors/mode-base';
 
 describe('MatterClusterMapper', () => {
   const identity = { deviceId: 'test-123', model: 'dreame.vacuum.test', firmware: '1.0' };
+
+  it('advertises normal and quiet profiles independently for each vacuum cleaning type', () => {
+    const state = createInitialState(identity);
+    expect(MatterClusterMapper.toMatterState(state).RvcCleanMode.supportedModes).toHaveLength(6);
+
+    state.activity.cleanMode = 'SWEEP';
+    state.activity.cleaningProfile = 'QUIET';
+    let clean = MatterClusterMapper.toMatterState(state).RvcCleanMode;
+    expect(clean.supportedModes).toContainEqual({ label: 'Quiet', mode: 4, modeTags: [{ value: 2 }, { value: 0x4001 }] });
+    expect(clean.supportedModes).toHaveLength(6);
+    expect(clean.currentMode).toBe(4);
+
+    state.activity.cleanGeniusMode = 1;
+    state.activity.cleanMode = 'SWEEP_AND_MOP';
+    state.activity.cleaningProfile = 'AUTO';
+    clean = MatterClusterMapper.toMatterState(state).RvcCleanMode;
+    expect(clean.supportedModes).toHaveLength(6);
+    expect(clean.currentMode).toBe(2);
+    expect(clean.supportedModes).toContainEqual(expect.objectContaining({ mode: 3 }));
+    for (const mode of [0, 1, 2]) {
+      expect(clean.supportedModes).toContainEqual(expect.objectContaining({ mode, modeTags: expect.arrayContaining([{ value: 0 }]) }));
+    }
+    state.activity.cleanMode = 'SWEEP_AND_MOP';
+    state.activity.cleaningProfile = 'QUIET';
+    clean = MatterClusterMapper.toMatterState(state).RvcCleanMode;
+    expect(clean.currentMode).toBe(5);
+    expect(clean.supportedModes).toContainEqual({ label: 'Quiet Sweep and Mop', mode: 5, modeTags: [{ value: 2 }, { value: 0x4001 }, { value: 0x4002 }] });
+  });
+
+  it.each([3, 4, 5])('keeps persisted profile mode %s valid without an opt-in setting', (mode) => {
+    const state = createInitialState(identity);
+    state.activity.cleaningProfile = mode === 3 ? 'AUTO' : 'QUIET';
+    state.activity.cleanMode = mode === 4 ? 'SWEEP' : 'SWEEP_AND_MOP';
+    const clean = MatterClusterMapper.toMatterState(state).RvcCleanMode;
+    expect(() => ModeUtils.assertMode(clean.supportedModes, mode)).not.toThrow();
+    expect(clean.currentMode).toBe(mode === 3 ? 2 : mode);
+  });
 
   describe('buildServiceArea', () => {
     it('should return undefined when no rooms are available', () => {

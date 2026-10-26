@@ -210,6 +210,33 @@ describe('StateParser', () => {
     expect(idle.activity.cleanMode).toBe('SWEEP_AND_MOP');
   });
 
+  it('should infer experimental profiles from real settings without losing them on partial updates', () => {
+    const parser = new StateParser(logger);
+    const initial = createInitialState(identity);
+    const automatic = parser.processProperties([
+      { siid: 4, piid: 50, value: JSON.stringify([{ k: 'SmartHost', v: 1 }]) },
+      { siid: 2, piid: 1, value: 12 },
+    ], initial);
+    expect(automatic.activity.cleaningProfile).toBe('AUTO');
+    const partial = parser.processProperties([{ siid: 3, piid: 1, value: 90 }], automatic);
+    expect(partial.activity.cleaningProfile).toBe('AUTO');
+    const quiet = parser.processProperties([
+      { siid: 4, piid: 50, value: [{ k: 'SmartHost', v: 0 }] },
+      { siid: 4, piid: 4, value: 0 },
+      { siid: 2, piid: 1, value: 1 },
+    ], partial);
+    expect(quiet.activity.cleaningProfile).toBe('QUIET');
+    const manual = parser.processProperties([{ siid: 4, piid: 4, value: 3 }], quiet);
+    expect(manual.activity.cleaningProfile).toBeUndefined();
+    const combinedQuiet = parser.processProperties([
+      { siid: 2, piid: 1, value: 12 }, { siid: 4, piid: 4, value: 0 },
+    ], manual);
+    expect(combinedQuiet.activity.cleaningProfile).toBe('QUIET');
+    expect(combinedQuiet.activity.cleanMode).toBe('SWEEP_AND_MOP');
+    const normal = parser.processProperties([{ siid: 4, piid: 4, value: 1 }], combinedQuiet);
+    expect(normal.activity.cleaningProfile).toBe('NORMAL');
+  });
+
   it('should parse error code', () => {
     const parser = new StateParser(logger);
     const state = createInitialState(identity);

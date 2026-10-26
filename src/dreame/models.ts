@@ -1,4 +1,5 @@
-import type { CleaningMode } from '../config.js';
+import type { CleaningMode, CleaningProfile } from '../config.js';
+import { DreameCapabilities, resolveCapabilities } from './capabilities.js';
 
 /** Device identity from cloud discovery. */
 export interface Identity {
@@ -46,9 +47,12 @@ export const MIOT = {
     STATUS: 1,
     SUCTION: 4,
     WATER: 5,
+    WATER_TANK: 6,
     CLEANING_PROPERTIES: 10,
     CLEAN_MODE: 23,
     SELF_WASH_BASE_STATUS: 25,
+    CUSTOMIZED_CLEANING: 26,
+    AUTO_SWITCH_SETTINGS: 50,
     START_CUSTOM: 1,
     STOP: 2,
   },
@@ -57,7 +61,7 @@ export const MIOT = {
   /** siid 3 — Battery and charging service. */
   CHARGE: { siid: 3, DOCK: 1 },
   /** siid 6 — Map service. Names follow HA's Dreame mapping for map objects. */
-  MAP: { siid: 6, MAP_DATA: 1, FRAME_INFO: 2, OBJECT_NAME: 3, MAP_LIST: 8, RECOVERY_MAP_LIST: 9 },
+  MAP: { siid: 6, MAP_DATA: 1, FRAME_INFO: 2, OBJECT_NAME: 3, MAP_EXTEND_DATA: 4, MAP_LIST: 8, RECOVERY_MAP_LIST: 9, UPDATE_MAP_DATA: 2 },
   /** siid 7 — Find device service. Not present on every Dreame model. */
   LOCATE: { siid: 7, LOCATE: 1 },
 } as const;
@@ -74,7 +78,10 @@ export const POLL_PROPERTIES = [
   { siid: MIOT.BATTERY.siid, piid: MIOT.BATTERY.CHARGE_STATUS },
   { siid: MIOT.VACUUM.siid, piid: MIOT.VACUUM.SUCTION },
   { siid: MIOT.VACUUM.siid, piid: MIOT.VACUUM.WATER },
+  { siid: MIOT.VACUUM.siid, piid: MIOT.VACUUM.WATER_TANK },
+  { siid: MIOT.VACUUM.siid, piid: MIOT.VACUUM.CUSTOMIZED_CLEANING },
   { siid: MIOT.VACUUM.siid, piid: MIOT.VACUUM.CLEAN_MODE },
+  { siid: MIOT.VACUUM.siid, piid: MIOT.VACUUM.AUTO_SWITCH_SETTINGS },
 ] as const;
 
 /** Power state snapshot. */
@@ -90,6 +97,8 @@ export interface ActivityState {
   runMode: RunMode;
   paused: boolean;
   cleanMode: CleaningMode;
+  cleanGeniusMode?: number;
+  cleaningProfile?: CleaningProfile;
   suctionLevel: SuctionLevel;
   waterLevel: WaterLevel;
   activeError: string | null;
@@ -97,12 +106,14 @@ export interface ActivityState {
   maintenanceType: MaintenanceType;
   availableRooms: RoomInfo[];
   selectedRooms: string[];
+  selectedAreaIds?: number[];
   knownMaps: MapRooms[];
   currentMapId: number | undefined;
 }
 
 /** Full normalized device state. */
 export interface NormalizedState {
+  capabilities: DreameCapabilities;
   identity: Identity;
   power: PowerState;
   activity: ActivityState;
@@ -111,6 +122,7 @@ export interface NormalizedState {
 /** Creates an initial blank state. Mode/suction/water will be read from the robot. */
 export function createInitialState(identity: Identity): NormalizedState {
   return {
+    capabilities: resolveCapabilities(identity.model, identity.firmware),
     identity,
     power: {
       batteryPercent: 0,

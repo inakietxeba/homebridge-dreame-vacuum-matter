@@ -9,6 +9,7 @@ import {
   WaterLevel,
 } from './models.js';
 import { DreameCleaningModeCodec } from './cleaning-mode.js';
+import { normalizeDeviceState } from './capabilities.js';
 
 /**
  * Parses Dreame device properties (siid/piid pairs) into a NormalizedState.
@@ -30,12 +31,17 @@ export class StateParser {
     currentState: NormalizedState,
   ): NormalizedState {
     const state = structuredClone(currentState);
+    const tankProperty = properties.find((prop) => prop.siid === 4 && prop.piid === 6);
+    const tank = typeof tankProperty?.value === 'number' && tankProperty.value >= 0
+      ? tankProperty.value !== 0 || state.capabilities.embeddedTank === true
+      : state.capabilities.waterTankInstalled;
+    this.cleaningModeCodec.configureWaterTank(tank);
     let rawDeviceState: number | undefined;
     let rawCleaningMode: number | undefined;
 
     for (const prop of properties) {
       if (prop.siid === 2 && prop.piid === 1 && typeof prop.value === 'number') {
-        rawDeviceState = prop.value;
+        rawDeviceState = normalizeDeviceState(prop.value, state.capabilities);
       }
       if (prop.siid === 4 && prop.piid === 23 && typeof prop.value === 'number') {
         rawCleaningMode = prop.value;
@@ -44,6 +50,9 @@ export class StateParser {
 
     const previousLiftingMopEncoding = this.cleaningModeCodec.usesLiftingMopEncoding;
     this.cleaningModeCodec.observeLiveState(rawDeviceState, rawCleaningMode);
+    if ((rawDeviceState === 1 || rawDeviceState === 12) && rawCleaningMode !== undefined) {
+      state.capabilities.liftingMopPads = this.cleaningModeCodec.usesLiftingMopEncoding;
+    }
     if (previousLiftingMopEncoding !== this.cleaningModeCodec.usesLiftingMopEncoding) {
       this.log.debug(
         `Dreame cleaning-mode encoding learned from live state: `
@@ -57,6 +66,10 @@ export class StateParser {
     }
 
     this.normalizeCombinedState(state, rawDeviceState);
+    state.activity.cleaningProfile = (state.activity.cleanGeniusMode ?? 0) > 0
+      ? 'AUTO'
+      : state.activity.cleanMode !== 'MOP' && state.activity.suctionLevel === 0 ? 'QUIET'
+        : state.activity.cleanMode === 'MOP' || state.activity.suctionLevel === 1 ? 'NORMAL' : undefined;
     if (rawDeviceState !== undefined) {
       if (state.activity.runMode === 'error' && this.pendingErrorCode !== undefined) {
         state.activity.activeError = `Error ${this.pendingErrorCode}`;
@@ -100,7 +113,7 @@ export class StateParser {
   private applyDeviceState(state: NormalizedState, piid: number, value: unknown): void {
     switch (piid) {
       case 1: { // State
-        const numValue = value as number;
+        const numValue = normalizeDeviceState(value as number, state.capabilities);
         const runMode = DREAME_STATE[numValue];
         if (runMode) {
           state.activity.rawDeviceState = numValue;
@@ -157,7 +170,31 @@ export class StateParser {
 
   private applyVacuumSettings(state: NormalizedState, piid: number, value: unknown): void {
     switch (piid) {
+      case 50: {
+        try {
+          const settings: unknown = typeof value === 'string' ? JSON.parse(value) : value;
+          if (!Array.isArray(settings)) break;
+          const smartHost = settings.find((entry: unknown): entry is { k: string; v: number } =>
+            typeof entry === 'object' && entry !== null && 'k' in entry && entry.k === 'SmartHost'
+            && 'v' in entry && typeof entry.v === 'number');
+          if (smartHost && state.capabilities.cleanGenius !== false) {
+            state.activity.cleanGeniusMode = smartHost.v;
+            state.capabilities.cleanGenius = true;
+          }
+        } catch {
+          this.log.debug('Ignoring malformed Dreame auto-switch settings');
+        }
+        break;
+      }
       case 1: // Cleaning status (additional state info)
+        break;
+      case 6:
+        if (typeof value === 'number' && value >= 0) {
+          state.capabilities.waterTankInstalled = value !== 0 || state.capabilities.embeddedTank === true;
+        }
+        break;
+      case 26:
+        if (typeof value === 'number') state.capabilities.customizedCleaningSupported = true;
         break;
       case 4: { // Suction level
         const level = value as number;
@@ -175,6 +212,7 @@ export class StateParser {
       }
       case 23: { // Cleaning mode
         const rawMode = value as number;
+        if (typeof rawMode === 'number') state.capabilities.cleaningModeSupported = true;
         const mode = this.cleaningModeCodec.decode(rawMode);
         if (mode) {
           state.activity.cleanMode = mode;

@@ -278,7 +278,7 @@ export class DreameCloud {
     }
 
     // Extract firmware version from various possible fields
-    const firmware = this.firstString(data['mcuVersion'], data['featureVersion'], data['firmwareVersion']);
+    const firmware = this.firstString(data['firmwareVersion'], data['fw_ver'], data['ver'], data['mcuVersion'], data['featureVersion']);
     if (firmware) {
       this.deviceFirmware.set(deviceId, firmware);
     }
@@ -303,7 +303,16 @@ export class DreameCloud {
     });
 
     const resData = response['data'] as Record<string, unknown> | undefined;
-    return resData?.['result'] ?? null;
+    if (response['code'] !== undefined && response['code'] !== 0) {
+      throw new Error(`Dreame ${method} failed with cloud code ${String(response['code'])}`);
+    }
+    if (resData?.['error'] || (resData?.['code'] !== undefined && resData['code'] !== 0)) {
+      throw new Error(`Dreame ${method} returned a device error`);
+    }
+    if (resData?.['result'] === undefined || resData['result'] === null) {
+      throw new Error(`Dreame ${method} returned no result`);
+    }
+    return resData['result'];
   }
 
   async getProperties(deviceId: string, params: DreameProperty[]): Promise<DreameProperty[]> {

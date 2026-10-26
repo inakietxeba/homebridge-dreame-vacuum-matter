@@ -7,4 +7,5 @@ homebridge.log*
 *.tgz
 .DS_Store
 dreame-map-output
-scripts/
+scripts/*
+!scripts/import-ha-capabilities.py

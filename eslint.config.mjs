@@ -19,6 +19,7 @@ export default tseslint.config(
         clearInterval: 'readonly',
         clearTimeout: 'readonly',
         console: 'readonly',
+        document: 'readonly',
         fetch: 'readonly',
         process: 'readonly',
         RequestInit: 'readonly',

@@ -113,11 +113,11 @@ describe('MatterMappers', () => {
     expect(MatterMappers.mapRvcCleanMode('SWEEP_AND_MOP')).toBe(2);
   });
 
-  it('should advertise combined cleaning as simultaneous vacuum and mop', () => {
+  it('should advertise combined Automatic cleaning with vacuum and mop tags', () => {
     expect(MatterMappers.getSupportedCleanModes()).toContainEqual({
       label: 'Sweep and Mop',
       mode: 2,
-      modeTags: [{ value: 0x4001 }, { value: 0x4002 }],
+      modeTags: [{ value: 0 }, { value: 0x4001 }, { value: 0x4002 }],
     });
   });
 });

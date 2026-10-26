@@ -1,7 +1,27 @@
 import { describe, it, expect } from 'vitest';
-import { parsePlatformConfig } from '../src/config';
+import { parsePlatformConfig, shouldExposeDevice } from '../src/config';
 
 describe('Config', () => {
+  it.each([true, false])('accepts and ignores the removed experimental setting (%s)', (value) => {
+    const config = parsePlatformConfig({ platform: 'DreameVacuumMatter', experimentalCleaningProfiles: value } as any);
+    expect(config).not.toHaveProperty('experimentalCleaningProfiles');
+  });
+  it.each([
+    ['all', [], true, true],
+    ['selected', ['a'], true, false],
+    ['selected', ['a', 'b'], true, true],
+    ['selected', [], false, false],
+    ['none', ['a', 'b'], false, false],
+  ] as const)('filters devices with %s selection and IDs %j', (selection, ids, a, b) => {
+    const config = parsePlatformConfig({ platform: 'DreameVacuumMatter', deviceSelection: selection, deviceIds: [...ids] } as any);
+    expect(shouldExposeDevice(config, 'a')).toBe(a);
+    expect(shouldExposeDevice(config, 'b')).toBe(b);
+  });
+
+  it('rejects empty IDs and invalid selection modes', () => {
+    expect(() => parsePlatformConfig({ platform: 'DreameVacuumMatter', deviceSelection: 'invalid' } as any)).toThrow();
+    expect(() => parsePlatformConfig({ platform: 'DreameVacuumMatter', deviceIds: [' '] } as any)).toThrow();
+  });
   it('should parse minimal config with defaults', () => {
     // Ensure env vars don't interfere
     const savedEmail = process.env['DREAME_EMAIL'];
@@ -16,6 +36,8 @@ describe('Config', () => {
       password: 'secret',
     } as any);
     expect(config.country).toBe('eu');
+    expect(config.deviceSelection).toBe('all');
+    expect(shouldExposeDevice(config, 'any-robot')).toBe(true);
     expect(config.username).toBe('test@example.com');
     expect(config.password).toBe('secret');
     expect(config.automationDockSwitch).toBe(false);

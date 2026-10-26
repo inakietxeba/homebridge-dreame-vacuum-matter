@@ -24,6 +24,20 @@ describe('DreameCloud', () => {
     globalThis.fetch = originalFetch;
   });
 
+  it.each([
+    { code: -1, data: { result: { code: 0 } } },
+    { code: 0, data: { error: { code: -1 } } },
+    { code: 0, data: { code: -1 } },
+    { code: 0, data: {} },
+    { code: 0, data: { result: null } },
+  ])('rejects unsuccessful or missing command results: %j', async (response) => {
+    globalThis.fetch = vi.fn(async () => jsonResponse(response) as Response) as typeof fetch;
+    const cloud = new DreameCloud(createMockLogger());
+    (cloud as any).accessToken = 'token';
+    (cloud as any).tokenExpireTime = Date.now() + 60_000;
+    await expect(cloud.action('dev-a', 3, 1)).rejects.toThrow('Dreame');
+  });
+
   it('keeps command routing host and firmware scoped per device', async () => {
     const calls: Array<{ url: string; body?: string }> = [];
     globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -75,5 +89,16 @@ describe('DreameCloud', () => {
 
     expect(signals).toHaveLength(1);
     expect(signals[0]).toBeInstanceOf(AbortSignal);
+  });
+
+  it('prefers device firmware over a separate MCU version for capability thresholds', async () => {
+    globalThis.fetch = vi.fn(async () => jsonResponse({ code: 0, data: {
+      firmwareVersion: '4.3.9_1114', mcuVersion: '1.0', featureVersion: '1',
+    } }) as Response) as typeof fetch;
+    const cloud = new DreameCloud(createMockLogger());
+    (cloud as any).accessToken = 'token';
+    (cloud as any).tokenExpireTime = Date.now() + 60_000;
+    await cloud.getDeviceInfo('test');
+    expect(cloud.getDeviceFirmware('test')).toBe('4.3.9_1114');
   });
 });

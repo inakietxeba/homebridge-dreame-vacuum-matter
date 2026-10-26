@@ -1,8 +1,8 @@
 import type { API, DynamicPlatformPlugin, Logger as HomebridgeLogger, MatterAccessory, MatterAPI, PlatformAccessory, PlatformConfig } from 'homebridge';
-import { DreamePlatformConfig, parsePlatformConfig } from './config.js';
+import { DreamePlatformConfig, parsePlatformConfig, shouldExposeDevice } from './config.js';
 import { Logger } from './util/logger.js';
 import { DreameCloud } from './dreame/cloud.js';
-import { applyMapOverrides, fetchDreameMapRooms } from './dreame/maps.js';
+import { applyMapOverrides, fetchDreameMapState } from './dreame/maps.js';
 import { DreameMqttClient, MqttConnectionInfo } from './dreame/mqtt.js';
 import { StateParser } from './dreame/parser.js';
 import { DreameCleaningModeCodec } from './dreame/cleaning-mode.js';
@@ -47,7 +47,7 @@ export class DreameVacuumMatterPlatform implements DynamicPlatformPlugin {
 
     this.log.debug('Finished initializing platform:', this.config.name);
 
-    if (!this.config.username || !this.config.password) {
+    if (!this.publishesNoDevices && (!this.config.username || !this.config.password)) {
       this.log.error('Missing username or password in config. Cannot start plugin.');
       return;
     }
@@ -72,6 +72,11 @@ export class DreameVacuumMatterPlatform implements DynamicPlatformPlugin {
   configureAccessory(accessory: PlatformAccessory): void {
     this.log.debug('Loading HAP accessory from cache:', accessory.displayName);
     this.accessories.push(accessory);
+  }
+
+  private get publishesNoDevices(): boolean {
+    return this.config.deviceSelection === 'none'
+      || (this.config.deviceSelection === 'selected' && this.config.deviceIds.length === 0);
   }
 
   /**
@@ -113,6 +118,13 @@ export class DreameVacuumMatterPlatform implements DynamicPlatformPlugin {
 
     this.log.info(`${this.matterAccessories.size} cached Matter accessory(ies) found`);
 
+    if (this.publishesNoDevices) {
+      this.log.info('No robots selected for exposure. Removing this plugin\'s cached accessories.');
+      await cleanupStaleAccessories(matter, this.matterAccessories, this.activeAccessoryUuids, this.log);
+      this.cleanupStaleHapAccessories();
+      return;
+    }
+
     // Phase 1: Re-attach placeholder handlers to cached accessories immediately
     this.restoreCachedAccessories(matter);
 
@@ -130,17 +142,29 @@ export class DreameVacuumMatterPlatform implements DynamicPlatformPlugin {
 
     const devices = await cloud.getDevices();
     if (!devices || devices.length === 0) {
-      this.log.warn('No Dreame devices found under this account.');
-      await cleanupStaleAccessories(matter, this.matterAccessories, this.activeAccessoryUuids, this.log);
-      this.cleanupStaleHapAccessories();
+      this.log.warn('Dreame returned no devices. Keeping cached accessories unchanged; use deviceSelection=none to remove them explicitly.');
       return;
     }
 
     this.log.info(`Found ${devices.length} Dreame device(s). Provisioning...`);
+    let unknownSelectedId = false;
+    for (const deviceId of this.config.deviceSelection === 'selected' ? this.config.deviceIds : []) {
+      if (!devices.some((device) => device.did === deviceId)) {
+        this.log.warn(`Selected Dreame device ID ${deviceId} was not found in this account`);
+        unknownSelectedId = true;
+      }
+    }
+    if (unknownSelectedId) {
+      this.log.warn('Robot selection was not applied. Keeping cached accessories unchanged until all selected IDs are valid.');
+      return;
+    }
     for (const device of devices) {
       const deviceId = device.did;
       const deviceModel = device.model;
       const deviceName = device.name || deviceModel;
+      const exposed = shouldExposeDevice(this.config, deviceId);
+      this.log.info(`Discovered Dreame robot: ${deviceName} — ID: ${deviceId} — ${exposed ? 'selected' : 'excluded'}`);
+      if (!exposed) continue;
       const uuid = matter.uuid.generate(deviceId);
       this.activeAccessoryUuids.add(uuid);
       if (this.config.automationContactSensors) {
@@ -152,180 +176,221 @@ export class DreameVacuumMatterPlatform implements DynamicPlatformPlugin {
         this.activeHapAccessoryUuids.add(this.getAutomationDockSwitchUuid(deviceId));
       }
 
-      // Get device info (sets host for sendCommand routing)
-      await cloud.getDeviceInfo(deviceId);
-      const cleaningModeCodec = new DreameCleaningModeCodec();
-      const parser = new StateParser(this.log, cleaningModeCodec);
-
-      // Build command handlers — reuse Phase 1 handler if available, otherwise create new
-      let handlers = this.commandHandlers.get(uuid);
-      if (handlers) {
-        handlers.setCloud(cloud);
-        handlers.setCleaningModeCodec(cleaningModeCodec);
-      } else {
-        handlers = new MatterCommandHandlers(cloud, deviceId, this.log, 'SWEEP_AND_MOP', cleaningModeCodec);
-      }
-      let accessoryHandler: DreameVacuumAccessory | undefined = this.accessoryHandlers.get(uuid);
-      handlers.setOnCleanModeSelected((mode) => {
-        accessoryHandler?.applyUserCleanMode(mode);
-      });
-      handlers.setOnAreaSelectionChanged((areaIds) => {
-        accessoryHandler?.applyUserRoomSelection(areaIds);
-      });
-
-      const firmware = cloud.getDeviceFirmware(deviceId) ?? '1.0';
-      const identity: Identity = { deviceId, model: deviceModel, firmware };
-      const initialState = createInitialState(identity);
-
       try {
-        const discoveredMaps = await fetchDreameMapRooms(cloud, device, this.log);
-        const knownMaps = applyMapOverrides(discoveredMaps, this.config.mapOverrides, deviceId);
-        if (knownMaps.length > 0) {
-          initialState.activity.knownMaps = knownMaps;
-          initialState.activity.currentMapId = knownMaps[0]?.mapId;
-          initialState.activity.availableRooms = knownMaps[0]?.rooms ?? [];
-          const roomCount = knownMaps.reduce((total, map) => total + map.rooms.length, 0);
-          this.log.info(`Loaded ${roomCount} room segment(s) from ${knownMaps.length} Dreame map(s) for ${deviceName}`);
-          const suggestedMapOverrides = knownMaps.map((map) => ({
-            deviceId,
-            mapId: map.mapId,
-            name: map.name || `Map ${map.mapId}`,
-            rooms: map.rooms.map((room) => ({
-              segmentId: room.id,
-              name: room.name || `Room ${room.id}`,
-            })),
-          }));
-          this.log.info(
-            `Suggested room naming config for ${deviceName} (copy and edit names if needed): `
-            + `"mapOverrides":${JSON.stringify(suggestedMapOverrides)}`,
-          );
+        // Get device info (sets host for sendCommand routing)
+        await cloud.getDeviceInfo(deviceId);
+        const cleaningModeCodec = new DreameCleaningModeCodec();
+        const parser = new StateParser(this.log, cleaningModeCodec);
+
+        // Build command handlers — reuse Phase 1 handler if available, otherwise create new
+        let handlers = this.commandHandlers.get(uuid);
+        if (handlers) {
+          handlers.setCloud(cloud);
+          handlers.setCleaningModeCodec(cleaningModeCodec);
         } else {
-          this.log.debug(`No room segments loaded from Dreame maps for ${deviceName}`);
+          handlers = new MatterCommandHandlers(cloud, deviceId, this.log, 'SWEEP_AND_MOP', cleaningModeCodec);
         }
-      } catch (err: unknown) {
-        this.log.warn(`Failed to fetch Dreame map segments for ${deviceName}: ${err instanceof Error ? err.message : String(err)}`);
-      }
-
-      // Fetch initial properties from cloud
-      try {
-        const params = [
-          ...POLL_PROPERTIES.map((p) => ({ did: deviceId, siid: p.siid, piid: p.piid })),
-          { did: deviceId, siid: MIOT.VACUUM.siid, piid: MIOT.VACUUM.SELF_WASH_BASE_STATUS },
-          { did: deviceId, siid: MIOT.DOCK.siid, piid: MIOT.DOCK.DUST_COLLECTION },
-        ];
-        const props = await cloud.getProperties(deviceId, params);
-        if (props && props.length > 0) {
-          const hasSelfWashBase = props.some(
-            (p) => p.siid === MIOT.VACUUM.siid
-              && p.piid === MIOT.VACUUM.SELF_WASH_BASE_STATUS
-              && (p.code === undefined || p.code === 0)
-              && p.value !== undefined
-              && p.value !== null,
-          );
-          const hasAutoEmptyBase = props.some(
-            (p) => p.siid === MIOT.DOCK.siid
-              && p.piid === MIOT.DOCK.DUST_COLLECTION
-              && (p.code === undefined || p.code === 0)
-              && p.value !== undefined
-              && p.value !== null,
-          );
-          const liftingMopPads = hasSelfWashBase && hasAutoEmptyBase;
-          cleaningModeCodec.configureLiftingMopPads(liftingMopPads);
-          this.log.debug(
-            `Dreame cleaning-mode encoding for ${deviceName}: `
-            + `${liftingMopPads ? 'lifting-mop' : 'standard'} `
-            + `(selfWashBase=${hasSelfWashBase}, autoEmptyBase=${hasAutoEmptyBase})`,
-          );
-          const propsWithValues = props
-            .filter((p) => p.value !== undefined)
-            .map((p) => ({ siid: p.siid, piid: p.piid, value: p.value }));
-          const parsed = parser.processProperties(propsWithValues, initialState);
-          Object.assign(initialState, parsed);
-        }
-      } catch (err: unknown) {
-        this.log.warn(`Failed to fetch initial state for ${deviceName}, using defaults: ${err instanceof Error ? err.message : String(err)}`);
-      }
-
-      handlers.setAreaIdToRoomTargetMap(MatterClusterMapper.buildAreaIdToRoomTargetMap(initialState));
-      handlers.syncCurrentMapId(initialState.activity.currentMapId);
-
-      // Check if this device was cached
-      const cachedAccessory = this.matterAccessories.get(uuid);
-      let setupResult;
-
-      if (cachedAccessory) {
-        cachedAccessory.clusters = buildMatterClusters(initialState);
-        // Cached: re-attach handlers with real cloud connection and update metadata
-        reattachHandlers(cachedAccessory, handlers, matter, this.log);
-        setupResult = await updateCachedMatterAccessory(matter, cachedAccessory, this.log);
-      } else {
-        // New: build and register a fresh MatterAccessory
-        const newAccessory = buildMatterAccessory(matter, handlers, identity, initialState, deviceName, this.log);
-        if (!newAccessory) continue;
-        setupResult = await registerNewMatterAccessory(matter, newAccessory, this.log);
-        if (setupResult.configured) {
-          this.matterAccessories.set(uuid, newAccessory);
-        }
-      }
-
-      if (!setupResult.configured) continue;
-
-      const automationSensors = this.config.automationContactSensors
-        ? this.setupAutomationSensors(deviceName, deviceId, deviceModel, initialState)
-        : undefined;
-
-      // Create accessory handler for state push
-      accessoryHandler = new DreameVacuumAccessory(this.log.getRaw(), uuid, initialState, this.api, {
-        disableMatterStatePush: !setupResult.statePushSupported,
-      });
-      accessoryHandler.markRegistered();
-      this.accessoryHandlers.set(uuid, accessoryHandler);
-      this.commandHandlers.set(uuid, handlers);
-      if (this.config.automationDockSwitch) {
-        this.setupAutomationDockSwitch(deviceName, deviceId, deviceModel, handlers, accessoryHandler);
-      }
-
-      // Create device session with MQTT
-      const session = new DeviceSession(
-        deviceId,
-        deviceName,
-        handlers,
-        accessoryHandler,
-        parser,
-        this.log,
-        automationSensors,
-      );
-
-      // Connect MQTT if bindDomain is available
-      if (device.bindDomain && cloud.uid && cloud.token) {
-        const mqttInfo: MqttConnectionInfo = {
-          host: device.bindDomain.includes(':') ? device.bindDomain : `${device.bindDomain}:19328`,
-          did: deviceId,
-          uid: cloud.uid,
-          model: deviceModel,
-          accessToken: cloud.token,
-          country: this.config.country,
-        };
-
-        const mqttClient = new DreameMqttClient(this.log, mqttInfo);
-
-        // Wire token refresh
-        const unsub = cloud.onTokenRefresh((newToken) => {
-          mqttClient.updateToken(newToken);
+        let accessoryHandler: DreameVacuumAccessory | undefined = this.accessoryHandlers.get(uuid);
+        handlers.setOnCleanModeSelected((mode) => {
+          accessoryHandler?.applyUserCleanMode(mode);
         });
-        this.tokenRefreshUnsubs.push(unsub);
+        handlers.setOnCleaningProfileSelected((profile, mode) => {
+          accessoryHandler?.applyUserCleaningProfile(profile, mode);
+        });
+        handlers.setOnAreaSelectionChanged((areaIds) => {
+          accessoryHandler?.applyUserRoomSelection(areaIds);
+        });
 
-        session.connectMqtt(mqttClient);
-        this.log.info(`MQTT provisioned for ${deviceName} via ${device.bindDomain}`);
-      } else {
-        this.log.warn(`No MQTT endpoint for ${deviceName} — state updates via polling only`);
+        const firmware = cloud.getDeviceFirmware(deviceId) ?? '1.0';
+        const identity: Identity = { deviceId, model: deviceModel, firmware };
+        const initialState = createInitialState(identity);
+        cleaningModeCodec.configureLiftingMopPads(initialState.capabilities.liftingMopPads === true, initialState.capabilities.knownModel);
+
+        try {
+          const mapState = await fetchDreameMapState(cloud, device, this.log);
+          const knownMaps = applyMapOverrides(mapState.maps, this.config.mapOverrides, deviceId);
+          if (knownMaps.length > 0) {
+            initialState.activity.knownMaps = knownMaps;
+            initialState.activity.currentMapId = mapState.currentMapId;
+            initialState.activity.availableRooms = knownMaps.find((map) => map.mapId === mapState.currentMapId)?.rooms ?? [];
+            const roomCount = knownMaps.reduce((total, map) => total + map.rooms.length, 0);
+            this.log.info(`Loaded ${roomCount} room segment(s) from ${knownMaps.length} Dreame map(s) for ${deviceName}`);
+            const suggestedMapOverrides = knownMaps.map((map) => ({
+              deviceId,
+              mapId: map.mapId,
+              name: map.name || `Map ${map.mapId}`,
+              rooms: map.rooms.map((room) => ({
+                segmentId: room.id,
+                name: room.name || `Room ${room.id}`,
+              })),
+            }));
+            this.log.info(
+              `Suggested room naming config for ${deviceName} (copy and edit names if needed): `
+              + `"mapOverrides":${JSON.stringify(suggestedMapOverrides)}`,
+            );
+          } else {
+            this.log.debug(`No room segments loaded from Dreame maps for ${deviceName}`);
+          }
+        } catch (err: unknown) {
+          this.log.warn(`Failed to fetch Dreame map segments for ${deviceName}: ${err instanceof Error ? err.message : String(err)}`);
+        }
+
+        // Fetch initial properties from cloud
+        try {
+          const params = [
+            ...POLL_PROPERTIES.map((p) => ({ did: deviceId, siid: p.siid, piid: p.piid })),
+            { did: deviceId, siid: MIOT.VACUUM.siid, piid: MIOT.VACUUM.SELF_WASH_BASE_STATUS },
+            { did: deviceId, siid: MIOT.DOCK.siid, piid: MIOT.DOCK.DUST_COLLECTION },
+            { did: deviceId, siid: MIOT.VACUUM.siid, piid: MIOT.VACUUM.AUTO_SWITCH_SETTINGS },
+          ];
+          const props = await cloud.getProperties(deviceId, params);
+          if (props && props.length > 0) {
+            const hasSelfWashBase = props.some(
+              (p) => p.siid === MIOT.VACUUM.siid
+                && p.piid === MIOT.VACUUM.SELF_WASH_BASE_STATUS
+                && (p.code === undefined || p.code === 0)
+                && p.value !== undefined
+                && p.value !== null,
+            );
+            const hasAutoEmptyBase = props.some(
+              (p) => p.siid === MIOT.DOCK.siid
+                && p.piid === MIOT.DOCK.DUST_COLLECTION
+                && (p.code === undefined || p.code === 0)
+                && p.value !== undefined
+                && p.value !== null,
+            );
+            const liftingMopPads = initialState.capabilities.liftingMopPads === true || (hasSelfWashBase && hasAutoEmptyBase);
+            initialState.capabilities.liftingMopPads = liftingMopPads;
+            for (const property of props) {
+              if (property.siid !== MIOT.VACUUM.siid) continue;
+              if (property.piid === MIOT.VACUUM.CLEAN_MODE) {
+                initialState.capabilities.cleaningModeSupported = (property.code === undefined || property.code === 0)
+                  && typeof property.value === 'number';
+              }
+              if (property.piid === MIOT.VACUUM.CUSTOMIZED_CLEANING) {
+                initialState.capabilities.customizedCleaningSupported = (property.code === undefined || property.code === 0)
+                  && typeof property.value === 'number';
+              }
+              if (property.piid === MIOT.VACUUM.SELF_WASH_BASE_STATUS && property.code !== undefined && property.code !== 0) {
+                initialState.capabilities.cleanGenius = false;
+              }
+            }
+            cleaningModeCodec.configureLiftingMopPads(liftingMopPads, initialState.capabilities.knownModel);
+            cleaningModeCodec.configureSelfWashBase(hasSelfWashBase);
+            this.log.debug(
+              `Dreame cleaning-mode encoding for ${deviceName}: `
+              + `${liftingMopPads ? 'lifting-mop' : 'standard'} `
+              + `(selfWashBase=${hasSelfWashBase}, autoEmptyBase=${hasAutoEmptyBase})`,
+            );
+            const propsWithValues = props
+              .filter((p) => (p.code === undefined || p.code === 0) && p.value !== undefined && p.value !== null)
+              .map((p) => ({ siid: p.siid, piid: p.piid, value: p.value }));
+            const parsed = parser.processProperties(propsWithValues, initialState);
+            Object.assign(initialState, parsed);
+          }
+        } catch (err: unknown) {
+          this.log.warn(`Failed to fetch initial state for ${deviceName}, using defaults: ${err instanceof Error ? err.message : String(err)}`);
+        }
+
+        handlers.syncCapabilities(initialState.capabilities);
+        this.log.debug(`Dreame capabilities for ${deviceName}: ${JSON.stringify(initialState.capabilities)}`);
+        handlers.setAreaIdToRoomTargetMap(MatterClusterMapper.buildAreaIdToRoomTargetMap(initialState));
+        handlers.setMapStateProvider(async () => {
+          const mapState = await fetchDreameMapState(cloud, device, this.log);
+          const maps = applyMapOverrides(mapState.maps, this.config.mapOverrides, deviceId);
+          if (maps.length === 0) throw new Error('Dreame map list is unavailable; room cleaning was not started');
+          accessoryHandler?.applyMapState(maps, mapState.currentMapId);
+          return mapState.currentMapId;
+        });
+        handlers.syncCurrentMapId(initialState.activity.currentMapId);
+        handlers.resolveCleaningProfileForState(initialState.activity.cleaningProfile);
+        handlers.syncCleanModeFromDevice(initialState.activity.cleanMode);
+        handlers.syncLevelsFromDevice(initialState.activity.suctionLevel, initialState.activity.waterLevel);
+
+        // Check if this device was cached
+        const cachedAccessory = this.matterAccessories.get(uuid);
+        let setupResult;
+
+        if (cachedAccessory) {
+          cachedAccessory.clusters = buildMatterClusters(initialState);
+          // Cached: re-attach handlers with real cloud connection and update metadata
+          reattachHandlers(cachedAccessory, handlers, matter, this.log);
+          setupResult = await updateCachedMatterAccessory(matter, cachedAccessory, this.log);
+        } else {
+          // New: build and register a fresh MatterAccessory
+          const newAccessory = buildMatterAccessory(matter, handlers, identity, initialState, deviceName, this.log);
+          if (!newAccessory) continue;
+          setupResult = await registerNewMatterAccessory(matter, newAccessory, this.log);
+          if (setupResult.configured) {
+            this.matterAccessories.set(uuid, newAccessory);
+          }
+        }
+
+        if (!setupResult.configured) continue;
+
+        const automationSensors = this.config.automationContactSensors
+          ? this.setupAutomationSensors(deviceName, deviceId, deviceModel, initialState)
+          : undefined;
+
+        // Create accessory handler for state push
+        accessoryHandler = new DreameVacuumAccessory(this.log.getRaw(), uuid, initialState, this.api, {
+          disableMatterStatePush: !setupResult.statePushSupported,
+        });
+        accessoryHandler.markRegistered();
+        this.accessoryHandlers.set(uuid, accessoryHandler);
+        this.commandHandlers.set(uuid, handlers);
+        if (this.config.automationDockSwitch) {
+          this.setupAutomationDockSwitch(deviceName, deviceId, deviceModel, handlers, accessoryHandler);
+        }
+
+        // Create device session with MQTT
+        const session = new DeviceSession(
+          deviceId,
+          deviceName,
+          handlers,
+          accessoryHandler,
+          parser,
+          this.log,
+          automationSensors,
+        );
+        this.deviceSessions.set(uuid, session);
+
+        // Connect MQTT if bindDomain is available
+        if (device.bindDomain && cloud.uid && cloud.token) {
+          const mqttInfo: MqttConnectionInfo = {
+            host: device.bindDomain.includes(':') ? device.bindDomain : `${device.bindDomain}:19328`,
+            did: deviceId,
+            uid: cloud.uid,
+            model: deviceModel,
+            accessToken: cloud.token,
+            country: this.config.country,
+          };
+
+          const mqttClient = new DreameMqttClient(this.log, mqttInfo);
+
+          // Wire token refresh
+          const unsub = cloud.onTokenRefresh((newToken) => {
+            mqttClient.updateToken(newToken);
+          });
+          this.tokenRefreshUnsubs.push(unsub);
+
+          session.connectMqtt(mqttClient);
+          this.log.info(`MQTT provisioned for ${deviceName} via ${device.bindDomain}`);
+        } else {
+          this.log.warn(`No MQTT endpoint for ${deviceName} — state updates via polling only`);
+        }
+
+        // Enable HTTP polling backup
+        session.setCloud(cloud);
+
+        this.log.info(`Device ${deviceName} (${deviceId}) ready — model: ${deviceModel}`);
+        this.log.info(`Pair ${deviceName} using its own external Matter QR/manual code shown by Homebridge, not the main bridge code. HAP is not required for the vacuum.`);
+      } catch (err: unknown) {
+        this.deviceSessions.get(uuid)?.dispose();
+        this.deviceSessions.delete(uuid);
+        this.accessoryHandlers.get(uuid)?.dispose();
+        this.log.error(`Failed to initialize ${deviceName} (${deviceId}): ${err instanceof Error ? err.message : String(err)}`);
       }
-
-      // Enable HTTP polling backup
-      session.setCloud(cloud);
-
-      this.deviceSessions.set(uuid, session);
-      this.log.info(`Device ${deviceName} (${deviceId}) ready — model: ${deviceModel}`);
     }
 
     await cleanupStaleAccessories(matter, this.matterAccessories, this.activeAccessoryUuids, this.log);

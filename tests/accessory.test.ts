@@ -42,6 +42,20 @@ describe('DreameVacuumAccessory', () => {
   });
 
   describe('debounced sync', () => {
+    it('retries a failed operational-state cluster even if other clusters succeeded', async () => {
+      let fail = true;
+      const updateFn = vi.fn(async (_id, cluster) => {
+        if (cluster === 'rvcOperationalState' && fail) throw new Error('Temporary failure');
+      });
+      const accessory = new DreameVacuumAccessory(createMockLogger(), 'fake', createInitialState(identity), createMockApi(updateFn));
+      accessory.markRegistered();
+      await drainInitialRegistrationSync();
+      expect(updateFn.mock.calls.filter((call) => call[1] === 'rvcOperationalState')).toHaveLength(1);
+      fail = false;
+      await vi.advanceTimersByTimeAsync(2_100);
+      expect(updateFn.mock.calls.filter((call) => call[1] === 'rvcOperationalState')).toHaveLength(2);
+      accessory.dispose();
+    });
     it('should not push immediately on state update', () => {
       const updateFn = vi.fn().mockResolvedValue(undefined);
       const api = createMockApi(updateFn);
@@ -290,6 +304,38 @@ describe('DreameVacuumAccessory', () => {
   });
 
   describe('dispose', () => {
+    it('ignores late updates and cannot be registered again after disposal', async () => {
+      const update = vi.fn().mockResolvedValue(undefined);
+      const original = createInitialState(identity);
+      const accessory = new DreameVacuumAccessory(createMockLogger(), 'fake', original, createMockApi(update));
+      accessory.markRegistered();
+      accessory.dispose();
+      const late = structuredClone(original);
+      late.power.batteryPercent = 10;
+      accessory.onStateUpdate(late);
+      accessory.markRegistered();
+      await vi.advanceTimersByTimeAsync(300_000);
+      expect(accessory.getCurrentState()).toBe(original);
+      expect(update).not.toHaveBeenCalled();
+      expect(vi.getTimerCount()).toBe(0);
+    });
+
+    it('does not schedule retries when an in-flight Matter push fails after disposal', async () => {
+      let reject!: (error: Error) => void;
+      const pending = new Promise<void>((_, fail) => { reject = fail; });
+      const update = vi.fn(() => pending);
+      const accessory = new DreameVacuumAccessory(createMockLogger(), 'fake', createInitialState(identity), createMockApi(update));
+      accessory.markRegistered();
+      await drainInitialRegistrationSync();
+      expect(update).toHaveBeenCalled();
+      const calls = update.mock.calls.length;
+      accessory.dispose();
+      reject(new Error('Temporary failure'));
+      await vi.advanceTimersByTimeAsync(300_000);
+      expect(update).toHaveBeenCalledTimes(calls);
+      expect(vi.getTimerCount()).toBe(0);
+    });
+
     it('should clean up all timers', () => {
       const api = createMockApi();
       const accessory = new DreameVacuumAccessory(

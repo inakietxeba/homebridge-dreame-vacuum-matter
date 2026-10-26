@@ -44,19 +44,33 @@ interface DecodedMap {
   rooms: RoomInfo[];
 }
 
+export interface DreameMapState {
+  maps: MapRooms[];
+  currentMapId?: number;
+}
+
 export async function fetchDreameMapRooms(
   cloud: DreameCloud,
   device: Pick<DreameDevice, 'did' | 'model' | 'name'>,
   log: Logger,
 ): Promise<MapRooms[]> {
+  return (await fetchDreameMapState(cloud, device, log)).maps;
+}
+
+export async function fetchDreameMapState(
+  cloud: DreameCloud,
+  device: Pick<DreameDevice, 'did' | 'model' | 'name'>,
+  log: Logger,
+): Promise<DreameMapState> {
   const props = await cloud.getProperties(device.did, [
     { did: device.did, siid: MIOT.MAP.siid, piid: MIOT.MAP.MAP_LIST },
   ]);
   const mapList = props.find((prop) => prop.siid === MIOT.MAP.siid && prop.piid === MIOT.MAP.MAP_LIST);
-  const objectName = extractObjectName(mapList?.value);
+  const objectName = mapList && (mapList.code === undefined || mapList.code === 0)
+    ? extractObjectName(mapList.value) : undefined;
   if (!objectName) {
     log.debug(`No Dreame MAP_LIST object found for ${device.name || device.did}`);
-    return [];
+    return { maps: [] };
   }
 
   const url = await cloud.getFileDownloadUrl({
@@ -66,21 +80,28 @@ export async function fetchDreameMapRooms(
   });
   if (!url) {
     log.warn(`Dreame MAP_LIST download URL was empty for ${device.name || device.did}`);
-    return [];
+    return { maps: [] };
   }
 
   const mapListText = await cloud.downloadText(url);
-  return parseDreameMapList(mapListText);
+  return parseDreameMapState(mapListText);
 }
 
 export function parseDreameMapList(text: string): MapRooms[] {
+  return parseDreameMapState(text).maps;
+}
+
+export function parseDreameMapState(text: string): DreameMapState {
   const json = JSON.parse(text) as Record<string, unknown>;
   const mapEntries = pickArray(json['mapstr'], json['mapStr'], json['maps']);
-  if (!mapEntries) return [];
+  if (!mapEntries) return { maps: [] };
 
-  return mapEntries
+  const maps = mapEntries
     .map((entry, index) => parseMapEntry(entry, index))
     .filter((map): map is MapRooms => map !== null);
+  const currentId = firstNumber(json['curr_id']);
+  const currentMapId = maps.some((map) => map.mapId === currentId) ? currentId : undefined;
+  return { maps, currentMapId };
 }
 
 export function applyMapOverrides(
@@ -119,7 +140,8 @@ function parseMapEntry(entry: unknown, index: number): MapRooms | null {
 
   const decoded = decodeMapPayload(inlineMap);
   const entryMapId = firstNumber(data['mapid'], data['map_id'], data['id']);
-  const mapId = decoded.mapId || entryMapId || index + 1;
+  // Saved-map IDs identify floors; the inline frame may carry a different ID.
+  const mapId = entryMapId || decoded.mapId || index + 1;
   const name = firstString(data['name'], data['map_name']);
 
   return {
@@ -245,7 +267,7 @@ function firstNumber(...values: unknown[]): number | undefined {
   for (const value of values) {
     if (typeof value === 'number' && Number.isFinite(value)) return value;
     if (typeof value === 'string' && value.length > 0) {
-      const parsed = Number.parseInt(value, 10);
+      const parsed = Number(value);
       if (Number.isFinite(parsed)) return parsed;
     }
   }

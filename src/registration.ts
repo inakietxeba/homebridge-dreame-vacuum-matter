@@ -100,10 +100,23 @@ function buildHandlers(
     },
     rvcCleanMode: {
       changeToMode: wrapHandler('rvcCleanMode.changeToMode', async (request?: { newMode?: number }) => {
+        if (request?.newMode === 3) {
+          await handlers.handleCleaningProfile('AUTO', 'SWEEP_AND_MOP');
+          await matter.updateAccessoryState?.(uuid, cn?.RvcCleanMode ?? 'rvcCleanMode', { currentMode: 3 });
+          return;
+        }
+        if (request?.newMode === 4 || request?.newMode === 5) {
+          const mode = request.newMode === 4 ? 'SWEEP' : 'SWEEP_AND_MOP';
+          await handlers.handleCleaningProfile('QUIET', mode);
+          await matter.updateAccessoryState?.(uuid, cn?.RvcCleanMode ?? 'rvcCleanMode', {
+            currentMode: request.newMode,
+          });
+          return;
+        }
         const modeMap: Record<number, CleaningMode> = { 0: 'SWEEP', 1: 'MOP', 2: 'SWEEP_AND_MOP' };
         const mode = request?.newMode !== undefined ? modeMap[request.newMode] : undefined;
         if (mode) {
-          await handlers.handleCleaningMode(mode);
+          await handlers.handleCleaningProfile(mode === 'SWEEP_AND_MOP' ? 'AUTO' : 'NORMAL', mode);
           // Command handler — MUST manually update state
           if (matter.updateAccessoryState && request?.newMode !== undefined) {
             await matter.updateAccessoryState(uuid, cn?.RvcCleanMode ?? 'rvcCleanMode', {

@@ -20,11 +20,19 @@ const LIFTING_MOP_MODE_TO_VALUE: Record<CleaningMode, number> = {
  */
 export class DreameCleaningModeCodec {
   private liftingMopPads = false;
+  private modelEncodingKnown = false;
+  private selfWashBase = false;
+  private waterTankInstalled?: boolean;
   private lastRawValue: number | undefined;
 
-  public configureLiftingMopPads(enabled: boolean): void {
+  public configureLiftingMopPads(enabled: boolean, authoritative = false): void {
     this.liftingMopPads = enabled;
+    this.modelEncodingKnown = authoritative;
   }
+
+  public configureSelfWashBase(enabled: boolean): void { this.selfWashBase = enabled; }
+
+  public configureWaterTank(installed: boolean | undefined): void { this.waterTankInstalled = installed; }
 
   public get usesLiftingMopEncoding(): boolean {
     return this.liftingMopPads;
@@ -35,7 +43,7 @@ export class DreameCleaningModeCodec {
    * 1 means sweep and state 12 means sweep-and-mop across supported models.
    */
   public observeLiveState(rawDeviceState: number | undefined, rawMode: number | undefined): void {
-    if (rawDeviceState === undefined || rawMode === undefined) return;
+    if (this.modelEncodingKnown || rawDeviceState === undefined || rawMode === undefined) return;
 
     const modeBits = rawMode & 0x03;
     if ((rawDeviceState === 1 && modeBits === 2) || (rawDeviceState === 12 && modeBits === 0)) {
@@ -47,6 +55,9 @@ export class DreameCleaningModeCodec {
 
   public decode(rawValue: number): CleaningMode | undefined {
     this.lastRawValue = rawValue;
+    if (this.selfWashBase && !this.liftingMopPads) {
+      return this.waterTankInstalled === false ? 'SWEEP' : (rawValue & 1) === 1 ? 'MOP' : 'SWEEP_AND_MOP';
+    }
     if (!this.liftingMopPads) {
       return DREAME_CLEAN_MODE[rawValue];
     }
@@ -60,6 +71,10 @@ export class DreameCleaningModeCodec {
   }
 
   public encode(mode: CleaningMode): number {
+    if (this.selfWashBase && this.lastRawValue === undefined) throw new Error('Read the packed cleaning mode before changing it');
+    if (this.selfWashBase && !this.liftingMopPads) {
+      return (this.lastRawValue! & ~1) | (mode === 'MOP' ? 1 : 0);
+    }
     const modeValue = this.liftingMopPads
       ? LIFTING_MOP_MODE_TO_VALUE[mode]
       : STANDARD_MODE_TO_VALUE[mode];

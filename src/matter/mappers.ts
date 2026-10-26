@@ -194,9 +194,25 @@ export class MatterMappers {
         { value: MatterRvcCleanModeTag.MOP },
       ],
     },
+    // Matter restores currentMode from its own storage before applying live
+    // updates. Keep the previous beta's ID valid without a second Auto profile.
+    {
+      label: 'Legacy Combined',
+      mode: 3,
+      modeTags: [{ value: MatterRvcCleanModeTag.VACUUM }, { value: MatterRvcCleanModeTag.MOP }],
+    },
   ];
 
-  public static getSupportedCleanModes() { return MatterMappers.SUPPORTED_CLEAN_MODES; }
+  public static getSupportedCleanModes() {
+    return [
+      // Auto means normal vacuuming for Sweep and CleanGenius for combined cleaning.
+      ...MatterMappers.SUPPORTED_CLEAN_MODES.map((mode) => ({
+        ...mode, modeTags: mode.mode === 3 ? mode.modeTags : [{ value: 0 }, ...mode.modeTags],
+      })),
+      { label: 'Quiet', mode: 4, modeTags: [{ value: 2 }, { value: MatterRvcCleanModeTag.VACUUM }] },
+      { label: 'Quiet Sweep and Mop', mode: 5, modeTags: [{ value: 2 }, { value: MatterRvcCleanModeTag.VACUUM }, { value: MatterRvcCleanModeTag.MOP }] },
+    ];
+  }
 
   private static readonly OPERATIONAL_STATE_LIST = [
     { operationalStateId: MatterOperationalState.STOPPED },

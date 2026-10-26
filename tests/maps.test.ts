@@ -1,8 +1,38 @@
 import * as zlib from 'zlib';
-import { describe, expect, it } from 'vitest';
-import { applyMapOverrides, parseDreameMapList } from '../src/dreame/maps';
+import { describe, expect, it, vi } from 'vitest';
+import { applyMapOverrides, fetchDreameMapState, parseDreameMapList, parseDreameMapState } from '../src/dreame/maps';
 
 describe('Dreame map parsing', () => {
+  it('fetches the current map from the downloaded MAP_LIST metadata', async () => {
+    const cloud = {
+      getProperties: vi.fn(async () => [{ siid: 6, piid: 8, code: 0, value: JSON.stringify({ object_name: 'test-map-list' }) }]),
+      getFileDownloadUrl: vi.fn(async () => 'https://example.invalid/maps'),
+      downloadText: vi.fn(async () => JSON.stringify({ curr_id: 20, mapstr: [
+        { id: 10, map: buildInlineMap() }, { id: 20, map: buildInlineMap() },
+      ] })),
+    };
+    const result = await fetchDreameMapState(cloud as any, { did: 'fake', model: 'test', name: 'Robot' }, { debug: vi.fn(), warn: vi.fn() } as any);
+    expect(result.currentMapId).toBe(20);
+    expect(result.maps.map((map) => map.mapId)).toEqual([10, 20]);
+    expect(cloud.getProperties).toHaveBeenCalledWith('fake', [{ did: 'fake', siid: 6, piid: 8 }]);
+  });
+
+  it('reads the selected saved-map ID instead of choosing the first inline frame', () => {
+    const state = parseDreameMapState(JSON.stringify({ curr_id: '20', mapstr: [
+      { id: 10, name: 'Downstairs', map: buildInlineMap() },
+      { id: 20, name: 'Upstairs', map: buildInlineMap() },
+    ] }));
+    expect(state.maps.map((map) => map.mapId)).toEqual([10, 20]);
+    expect(state.currentMapId).toBe(20);
+  });
+
+  it.each([undefined, 999, '20junk'])('does not invent an active map when curr_id is %s', (id) => {
+    const state = parseDreameMapState(JSON.stringify({ curr_id: id, mapstr: [
+      { id: 10, map: buildInlineMap() }, { id: 20, map: buildInlineMap() },
+    ] }));
+    expect(state.currentMapId).toBeUndefined();
+  });
+
   it('parses saved map room segments from Dreame MAP_LIST JSON', () => {
     const fixture = JSON.stringify({
       mapstr: [

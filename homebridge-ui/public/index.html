@@ -1,0 +1,26 @@
+<section class="card card-body mb-3" aria-labelledby="robot-picker-title">
+  <h3 id="robot-picker-title">Robots to show in Apple Home</h3>
+  <p>Enter your account details below, then load your robots and select them by name.</p>
+  <div class="mb-3">
+    <label for="robot-selection" class="form-label">Show</label>
+    <select id="robot-selection" class="form-select" disabled>
+      <option value="all">All robots in this account (including future robots)</option>
+      <option value="selected">Only the robots checked below</option>
+      <option value="none">No robots</option>
+    </select>
+  </div>
+  <div><button id="load-robots" type="button" class="btn btn-primary mb-3" disabled>Load robots</button></div>
+  <p id="robot-status" role="status" aria-live="polite">Loading configuration...</p>
+  <fieldset id="robot-list" class="mb-3" hidden>
+    <legend class="h6">Robots in your Dreame account</legend>
+    <div id="robot-options"></div>
+  </fieldset>
+  <p class="small text-muted mb-0">Changes apply only after saving and restarting Homebridge. Excluding a previously added robot removes its accessory and automation helpers. Re-adding it may require pairing again and restoring its room and automations. No robot is deleted from Dreamehome.</p>
+  <p class="small text-muted mt-3 mb-0">Pair each vacuum with its own external Matter QR/manual code shown by Homebridge, not the main bridge code. HAP is only needed for optional automation helpers, not for the vacuum.</p>
+</section>
+<script type="module">
+  import { initRobotPicker } from './picker.js';
+  initRobotPicker(window.homebridge).catch(() => {
+    document.getElementById('robot-status').textContent = 'Could not initialize settings. Close and reopen the settings window.';
+  });
+</script>

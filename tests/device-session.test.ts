@@ -7,8 +7,12 @@ const identity = { deviceId: 'dev-1', model: 'dreame.vacuum.test', firmware: '1.
 
 function createMockHandlers() {
   return {
+    syncCapabilities: vi.fn(),
     resolveCleanModeForState: vi.fn((mode: string) => mode),
     syncCleanModeFromDevice: vi.fn(),
+    resolveCleaningProfileForState: vi.fn((profile) => profile),
+    syncLevelsFromDevice: vi.fn(),
+    syncCurrentMapId: vi.fn(),
   } as any;
 }
 
@@ -171,6 +175,23 @@ describe('DeviceSession', () => {
   });
 
   describe('HTTP polling', () => {
+    it('polls after 15 seconds when MQTT disconnects during cleaning', async () => {
+      const state = createInitialState(identity);
+      state.activity.runMode = 'cleaning';
+      const session = new DeviceSession('dev-1', 'TestBot', handlers, createMockAccessory(state), parser, log);
+      const cloud = createMockCloud();
+      const mqtt = createMockMqtt();
+      session.connectMqtt(mqtt as any);
+      mqtt.emit('connected');
+      session.setCloud(cloud);
+      await vi.advanceTimersByTimeAsync(10_000);
+      mqtt.emit('disconnected');
+      await vi.advanceTimersByTimeAsync(14_999);
+      expect(cloud.getProperties).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(cloud.getProperties).toHaveBeenCalledOnce();
+      session.dispose();
+    });
     it('should schedule polling when cloud is set', () => {
       const session = new DeviceSession('dev-1', 'TestBot', handlers, accessory, parser, log);
       const cloud = createMockCloud();
@@ -235,6 +256,40 @@ describe('DeviceSession', () => {
   });
 
   describe('dispose', () => {
+    it('ignores an HTTP response arriving after disposal', async () => {
+      let resolve!: (properties: unknown[]) => void;
+      const cloud = { getProperties: vi.fn(() => new Promise((done) => { resolve = done; })) };
+      const sensors = createMockAutomationSensors();
+      const session = new DeviceSession('dev-1', 'TestBot', handlers, accessory, parser, log, sensors);
+      session.setCloud(cloud as any);
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(cloud.getProperties).toHaveBeenCalledOnce();
+      session.dispose();
+      resolve([{ siid: 2, piid: 1, value: 1 }]);
+      await vi.advanceTimersByTimeAsync(300_000);
+      expect(parser.processProperties).not.toHaveBeenCalled();
+      expect(accessory.onStateUpdate).not.toHaveBeenCalled();
+      expect(sensors.updateState).not.toHaveBeenCalled();
+      expect(cloud.getProperties).toHaveBeenCalledOnce();
+      expect(vi.getTimerCount()).toBe(0);
+    });
+
+    it('detaches MQTT listeners on replacement and disposal', () => {
+      const session = new DeviceSession('dev-1', 'TestBot', handlers, accessory, parser, log);
+      const oldMqtt = createMockMqtt();
+      const newMqtt = createMockMqtt();
+      session.connectMqtt(oldMqtt as any);
+      session.connectMqtt(newMqtt as any);
+      oldMqtt.emit('message', [{ siid: 2, piid: 1, value: 1 }]);
+      expect(parser.processProperties).not.toHaveBeenCalled();
+      newMqtt.emit('message', [{ siid: 2, piid: 1, value: 1 }]);
+      expect(parser.processProperties).toHaveBeenCalledOnce();
+      session.dispose();
+      newMqtt.emit('message', [{ siid: 2, piid: 1, value: 1 }]);
+      expect(parser.processProperties).toHaveBeenCalledOnce();
+      expect(vi.getTimerCount()).toBe(0);
+    });
+
     it('should disconnect MQTT and clear state', () => {
       const session = new DeviceSession('dev-1', 'TestBot', handlers, accessory, parser, log);
       const mqttClient = createMockMqtt();

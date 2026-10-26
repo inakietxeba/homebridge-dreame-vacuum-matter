@@ -2,6 +2,7 @@
   "pluginAlias": "DreameVacuumMatter",
   "pluginType": "platform",
   "singular": true,
+  "customUi": true,
   "headerDisplay": "Dreame Vacuum — Matter-native plugin for Homebridge v2. Uses Dreame Cloud + MQTT for real-time state.",
   "schema": {
     "type": "object",
@@ -40,6 +41,23 @@
           { "title": "Russia", "enum": ["ru"] }
         ],
         "description": "Dreame Cloud region — must match your Dreamehome app region."
+      },
+      "deviceSelection": {
+        "title": "Robots to Expose",
+        "type": "string",
+        "default": "all",
+        "oneOf": [
+          { "title": "All robots", "enum": ["all"] },
+          { "title": "Only selected robots", "enum": ["selected"] },
+          { "title": "No robots", "enum": ["none"] }
+        ],
+        "description": "Choose which robots are published. Excluding an existing robot removes its Matter accessory and optional automation accessories after restart; it does not delete the robot from Dreamehome."
+      },
+      "deviceIds": {
+        "title": "Selected Robot IDs",
+        "type": "array",
+        "items": { "type": "string", "title": "Robot ID", "minLength": 1 },
+        "description": "Stable IDs stored by the named robot picker. Advanced JSON configuration can set these manually. An empty selected list exposes no robots."
       },
       "automationContactSensors": {
         "title": "Expose Automation Contact Sensors",

@@ -1,6 +1,6 @@
 {
   "name": "homebridge-dreame-vacuum-matter",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "description": "Matter-native Homebridge v2 plugin for Dreame vacuum robots via Dreame Cloud + MQTT",
   "displayName": "Dreame Vacuum Matter",
   "license": "Apache-2.0",
@@ -18,7 +18,7 @@
   "scripts": {
     "build": "rm -rf dist && tsc",
     "watch": "tsc -w",
-    "lint": "eslint \"src/**/*.ts\" \"tests/**/*.ts\"",
+    "lint": "eslint \"src/**/*.ts\" \"tests/**/*.ts\" \"homebridge-ui/**/*.js\"",
     "test": "vitest run --coverage",
     "vitest": "vitest run",
     "type-check": "tsc --noEmit",
@@ -28,8 +28,12 @@
   "files": [
     "CHANGELOG.md",
     "dist",
+    "homebridge-ui",
     "config.schema.json",
     "PRIVACY.md",
+    "third-party",
+    "THIRD_PARTY_NOTICES.md",
+    "docs/capabilities.md",
     "SECURITY.md"
   ],
   "keywords": [
@@ -46,6 +50,7 @@
     "homebridge": ">=2.0.0-beta.0"
   },
   "dependencies": {
+    "@homebridge/plugin-ui-utils": "^2.2.6",
     "mqtt": "^5.7.0",
     "zod": "^4.4.3"
   },
@@ -55,6 +60,7 @@
     "@vitest/coverage-v8": "^3.2.1",
     "eslint": "^9.39.4",
     "homebridge": "^2.0.0-beta.0",
+    "jsdom": "^26.1.0",
     "typescript": "^5.7.0",
     "typescript-eslint": "^8.60.0",
     "vitest": "^3.2.1"
