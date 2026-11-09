@@ -23,6 +23,14 @@ describe('StateParser', () => {
     expect(result.power.batteryPercent).toBe(85);
   });
 
+  it.each([undefined, null, 'unknown', {}, Infinity, NaN])('preserves the previous battery on invalid input %s', (value) => {
+    const parser = new StateParser(logger);
+    const state = createInitialState(identity);
+    state.power.batteryPercent = 85;
+    const result = parser.processProperties([{ siid: 3, piid: 1, value }], state);
+    expect(result.power.batteryPercent).toBe(85);
+  });
+
   it('should parse device state', () => {
     const parser = new StateParser(logger);
     const state = createInitialState(identity);

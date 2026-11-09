@@ -41,6 +41,25 @@ describe('DreameVacuumAccessory', () => {
     vi.useRealTimers();
   });
 
+  it('limits repeated Matter warnings and reports a single recovery', () => {
+    const log = createMockLogger();
+    const accessory = new DreameVacuumAccessory(log, 'fake', createInitialState(identity), createMockApi(), { robotName: 'Robot\nA' });
+    (accessory as any).warnSync('cluster:one', 'first');
+    (accessory as any).warnSync('cluster:one', 'second');
+    expect(log.warn).toHaveBeenCalledTimes(1);
+    expect(log.warn).toHaveBeenCalledWith(expect.stringContaining('[Robot A]'));
+    (accessory as any).warnSync('cluster:two', 'different');
+    expect(log.warn).toHaveBeenCalledTimes(2);
+    vi.advanceTimersByTime(300_000);
+    (accessory as any).warnSync('cluster:two', 'later');
+    expect(log.warn).toHaveBeenCalledTimes(3);
+    (accessory as any).reportSyncRecovery();
+    (accessory as any).reportSyncRecovery();
+    expect(log.info).toHaveBeenCalledTimes(1);
+    expect(log.info).toHaveBeenCalledWith(expect.stringContaining('after 4 failures'));
+    accessory.dispose();
+  });
+
   describe('debounced sync', () => {
     it('retries a failed operational-state cluster even if other clusters succeeded', async () => {
       let fail = true;
@@ -202,8 +221,10 @@ describe('DreameVacuumAccessory', () => {
   describe('commanded state sync', () => {
     it('should publish returning-home state after a classic dock command', async () => {
       const updateFn = vi.fn().mockResolvedValue(undefined);
+      const state = createInitialState(identity);
+      state.activity.runMode = 'cleaning';
       const accessory = new DreameVacuumAccessory(
-        createMockLogger(), 'test-uuid-123', createInitialState(identity), createMockApi(updateFn),
+        createMockLogger(), 'test-uuid-123', state, createMockApi(updateFn),
       );
       accessory.markRegistered();
       await drainInitialRegistrationSync();
@@ -216,7 +237,7 @@ describe('DreameVacuumAccessory', () => {
       expect(updateFn).toHaveBeenCalledWith(
         'test-uuid-123',
         'rvcRunMode',
-        expect.objectContaining({ currentMode: 0x02 }),
+        expect.objectContaining({ currentMode: 0x00 }),
       );
       expect(updateFn).toHaveBeenCalledWith(
         'test-uuid-123',

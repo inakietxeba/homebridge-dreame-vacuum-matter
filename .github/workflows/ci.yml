@@ -42,5 +42,8 @@ jobs:
       - name: Build
         run: npm run build
 
+      - name: Test with Homebridge Matter
+        run: npm run test:matter
+
       - name: Pack dry run
         run: npm pack --dry-run

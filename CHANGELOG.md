@@ -2,6 +2,54 @@
 
 All notable changes to this project will be documented in this file.
 
+## 1.0.6 - 2026-11-09
+
+- Fix Matter accessory registration by reporting the return to dock as the operational state, not as a run mode with missing tags.
+- Leave confirmation of external Matter publication to Homebridge, which can report a failure even when the registration API call resolves.
+- Prevent Matter registration errors from duplicate or overlong map and room names and malformed Dreame battery readings.
+- Reject unsupported run commands and invalid room selections instead of reporting success or clearing the selection.
+- Keep room IDs and command routing aligned when the active map changes, and stop room tasks if a selected segment no longer exists.
+- Do not report HTTP polling recovery until Dreame returns usable property values.
+- Bundle tested production dependencies, including MQTT's corrected `ip-address` dependency, so tarball installations and upgrades use the corrected copies shipped with this plugin.
+- Raised the minimum MQTT dependency to the locally tested 5.15.1 release. Direct runtime dependency minimums now match the tested versions.
+
+- Added a per-robot map and room name editor that loads Dreame names and preserves saved overrides when discovery fails.
+- Fixed map discovery routing and clarified that robots must be powered on and connected to the internet.
+- Improved settings contrast and added external Matter accessory pairing instructions to settings and documentation.
+- Added concise per-robot logs, change-only debug state summaries and optional privacy-filtered extended diagnostics.
+- Limited repeated connection and Matter synchronization warnings, with a single recovery summary and safe authentication errors.
+- Removed startup pairing reminders and sensitive cloud response details from plugin logs.
+- Updated runtime dependencies and test tooling to resolve known npm security advisories, including Zod, MQTT's transitive IP parser and Vitest.
+- Removed repeated robot names from scoped session and Matter registration log messages.
+
+## 1.0.6-beta.5 - 2026-10-28
+
+- Report MQTT authentication failures once at error level without logging the response contents.
+
+## 1.0.6-beta.4 - 2026-10-27
+
+- Restricted Matter area-selection debug logging to validated area IDs.
+
+## 1.0.6-beta.3 - 2026-10-27
+
+- Added per-robot log context, compact change-only state logging and opt-in extended diagnostics restricted to safe numeric properties.
+- Reduced repeated connectivity and Matter synchronization warnings, and report recovery without changing retry behavior.
+- Removed repeated pairing guidance from startup; pairing instructions remain in plugin settings.
+
+## 1.0.6-beta.2 - 2026-10-27
+
+- Simplified startup logs: pairing guidance stays in plugin settings instead of repeating on every startup, map discovery logs counts instead of full naming configuration, and technical identifiers stay in debug output. Removed private cloud response bodies from errors.
+- Clarified that map discovery needs the robot powered on, online and available in Dreamehome, including specific guidance when cloud requests cannot reach the robot.
+
+## 1.0.6-beta.1 - 2026-10-26
+
+- Fixed map editor discovery to initialize per-device cloud routing before reading maps. Failure messages now identify the operation that failed without exposing cloud response data.
+
+## 1.0.6-beta.0 - 2026-10-26
+
+- Added a robot-specific map and room name editor that loads existing Dreame names without changing the robot. Preserves saved overrides on discovery failures and scopes edits by robot, map and room.
+- Improved custom settings text contrast and added step-by-step Apple Home pairing instructions.
+
 ## 1.0.5 - 2026-10-26
 
 Stable release validated on an L10s Ultra Gen 2, including startup, Matter registration and MQTT reconnection. M1 compatibility and multi-floor switching still require reporter validation.

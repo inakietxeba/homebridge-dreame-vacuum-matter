@@ -155,7 +155,9 @@ export class StateParser {
   private applyBatteryState(state: NormalizedState, piid: number, value: unknown): void {
     switch (piid) {
       case 1: // Battery level
-        state.power.batteryPercent = Math.max(0, Math.min(100, value as number));
+        if (typeof value === 'number' && Number.isFinite(value)) {
+          state.power.batteryPercent = Math.max(0, Math.min(100, value));
+        }
         break;
       case 2: { // Charge status
         const chargeInfo = DREAME_CHARGE_STATUS[value as number];

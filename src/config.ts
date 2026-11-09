@@ -23,6 +23,7 @@ export const platformConfigSchema = z.object({
   deviceIds: z.array(z.string().trim().min(1).max(256)).optional().default([]),
   automationContactSensors: z.boolean().optional().default(false),
   automationDockSwitch: z.boolean().optional().default(false),
+  diagnosticLogging: z.boolean().optional().default(false),
   mapOverrides: z.array(mapOverrideSchema).optional().default([]),
 });
 

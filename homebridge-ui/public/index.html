@@ -1,4 +1,13 @@
-<section class="card card-body mb-3" aria-labelledby="robot-picker-title">
+<style>
+  .dreame-picker .dreame-secondary { color: inherit; opacity: 0.85; line-height: 1.5; }
+  .dreame-picker .dreame-help { margin-top: 1.25rem; }
+  .dreame-picker .dreame-help p { margin-bottom: 0.5rem; }
+  .dreame-picker .dreame-help ol { padding-left: 1.5rem; }
+  .dreame-picker .dreame-help li { margin-bottom: 0.4rem; }
+  .dreame-picker .dreame-device-detail { display: block; overflow-wrap: anywhere; }
+  .dreame-picker .dreame-map { border: 1px solid currentColor; border-radius: 0.4rem; padding: 1rem; }
+</style>
+<section class="dreame-picker card card-body mb-3" aria-labelledby="robot-picker-title">
   <h3 id="robot-picker-title">Robots to show in Apple Home</h3>
   <p>Enter your account details below, then load your robots and select them by name.</p>
   <div class="mb-3">
@@ -15,8 +24,33 @@
     <legend class="h6">Robots in your Dreame account</legend>
     <div id="robot-options"></div>
   </fieldset>
-  <p class="small text-muted mb-0">Changes apply only after saving and restarting Homebridge. Excluding a previously added robot removes its accessory and automation helpers. Re-adding it may require pairing again and restoring its room and automations. No robot is deleted from Dreamehome.</p>
-  <p class="small text-muted mt-3 mb-0">Pair each vacuum with its own external Matter QR/manual code shown by Homebridge, not the main bridge code. HAP is only needed for optional automation helpers, not for the vacuum.</p>
+  <div class="dreame-help">
+    <h4 class="h6">Applying your selection</h4>
+    <p class="dreame-secondary">Save and restart Homebridge to apply changes.</p>
+    <p class="dreame-secondary">Excluding a robot removes its Homebridge accessory and automation helpers, not the robot from Dreamehome. Adding it again may require pairing and restoring its room and automations.</p>
+  </div>
+  <div class="dreame-help">
+    <h4 class="h6">Pairing with Apple Home</h4>
+    <ol class="dreame-secondary">
+      <li>After saving and restarting, open <strong>Plugins</strong> and find <strong>Dreame Vacuum Matter</strong>.</li>
+      <li>Open the <strong>three-dot menu</strong>, choose <strong>External Accessories</strong>, then select your vacuum.</li>
+      <li>In Apple Home, choose <strong>Add Accessory</strong> and scan or enter that robot's Matter code. Repeat for each robot.</li>
+    </ol>
+    <p class="dreame-secondary">Use each robot's own code, not the main bridge code. HAP is only needed for optional automation helpers.</p>
+  </div>
+</section>
+<section class="dreame-picker card card-body mb-3" aria-labelledby="map-editor-title">
+  <h3 id="map-editor-title">Map and room names</h3>
+  <p>Load robots above, then choose a robot to load its existing maps and rooms.</p>
+  <p class="dreame-secondary">The robot must be powered on, connected to the Internet and available in Dreamehome to load its maps.</p>
+  <p class="dreame-secondary">Custom names only change how this plugin presents maps and rooms in Apple Home. Nothing is renamed in Dreamehome. Loading maps does not save changes. Save and restart Homebridge after editing.</p>
+  <div class="mb-3">
+    <label for="map-robot" class="form-label">Robot</label>
+    <select id="map-robot" class="form-select" disabled></select>
+  </div>
+  <button id="load-maps" type="button" class="btn btn-primary mb-3" disabled>Load maps and rooms</button>
+  <p id="map-status" role="status" aria-live="polite">Load robots above to choose a robot. Saved names are preserved.</p>
+  <div id="map-editor"></div>
 </section>
 <script type="module">
   import { initRobotPicker } from './picker.js';

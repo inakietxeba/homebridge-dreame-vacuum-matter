@@ -50,6 +50,17 @@ beforeEach(() => {
 afterEach(() => vi.useRealTimers());
 
 describe('Device exposure during discovery', () => {
+  it('logs map counts without repeated pairing guidance, names, IDs or configuration at info level', async () => {
+    mapCloud.fetch.mockResolvedValue({ maps: [{ mapId: 10, name: 'private-floor', rooms: [{ id: '1', name: 'private-room' }] }], currentMapId: 10 });
+    const { platform, log, shutdown } = fixture({ deviceSelection: 'selected', deviceIds: ['a'] });
+    await platform.discoverDevices();
+    const output = JSON.stringify(log.info.mock.calls);
+    expect(output).toContain('Loaded 1 room segment(s) from 1 Dreame map(s)');
+    expect(output).not.toContain('To pair');
+    expect(output).not.toMatch(/private-floor|private-room|mapOverrides|UUID=|ID=|startup logs/);
+    shutdown();
+  });
+
   it('uses the reported active floor and refreshes app map changes before starting a room task', async () => {
     const maps = [
       { mapId: 10, rooms: [{ id: '1', name: 'Kitchen' }] },
@@ -97,12 +108,12 @@ describe('Device exposure during discovery', () => {
     expect(cloud.getDeviceInfo.mock.calls.map(([id]) => id)).toEqual(['a', 'b']);
     expect(matter.registerPlatformAccessories.mock.calls.map((call: any) => call[2][0].context.deviceId)).toEqual(['b']);
     expect(matter.unregisterPlatformAccessories).not.toHaveBeenCalled();
-    expect(log.error).toHaveBeenCalledWith(expect.stringContaining('Failed to initialize Robot A (a)'));
+    expect(log.error).toHaveBeenCalledWith(expect.stringContaining('Failed to initialize Robot A:'));
 
     cloud.getDeviceInfo.mockClear();
     await platform.discoverDevices();
     expect(cloud.getDeviceInfo.mock.calls.map(([id]) => id)).toEqual(['a', 'b']);
-    expect(log.info).toHaveBeenCalledWith(expect.stringContaining('Device Robot A (a) ready'));
+    expect(log.info).toHaveBeenCalledWith(expect.stringContaining('Robot Robot A ready'));
     shutdown();
   });
 
@@ -117,7 +128,7 @@ describe('Device exposure during discovery', () => {
     const { platform, matter, log, shutdown } = fixture();
     await platform.discoverDevices();
     expect(matter.registerPlatformAccessories.mock.calls.map((call: any) => call[2][0].context.deviceId)).toEqual(['a', 'b']);
-    expect(log.info).toHaveBeenCalledWith(expect.stringContaining('Pair Robot A using its own external Matter QR/manual code'));
+    expect(JSON.stringify(log.info.mock.calls)).not.toContain('To pair');
     shutdown();
   });
 
@@ -128,8 +139,9 @@ describe('Device exposure during discovery', () => {
     expect(cloud.getProperties).toHaveBeenCalledOnce();
     expect(matter.registerPlatformAccessories).toHaveBeenCalledOnce();
     expect((matter.registerPlatformAccessories.mock.calls[0] as any)[2][0].context.deviceId).toBe('b');
-    expect(log.info).toHaveBeenCalledWith(expect.stringContaining('Robot A — ID: a — excluded'));
-    expect(log.info).toHaveBeenCalledWith(expect.stringContaining('Robot B — ID: b — selected'));
+    expect(log.debug).toHaveBeenCalledWith(expect.stringContaining('[Robot A] Discovered robot: excluded'));
+    expect(log.debug).toHaveBeenCalledWith(expect.stringContaining('[Robot B] Discovered robot: selected'));
+    expect(JSON.stringify(log.info.mock.calls)).not.toContain('ID=');
     shutdown();
   });
 
@@ -164,7 +176,8 @@ describe('Device exposure during discovery', () => {
     const { platform, matter, log, shutdown } = fixture({ deviceSelection: 'selected', deviceIds: ['missing'] });
     platform.configureMatterAccessory({ UUID: 'uuid-a', displayName: 'A', context: { deviceId: 'a', model: 'test' } } as any);
     await platform.discoverDevices();
-    expect(log.warn).toHaveBeenCalledWith(expect.stringContaining('missing was not found'));
+    expect(log.warn).toHaveBeenCalledWith(expect.stringContaining('A selected robot was not found'));
+    expect(JSON.stringify(log.debug.mock.calls)).not.toContain('Missing selected robot ID');
     expect(matter.registerPlatformAccessories).not.toHaveBeenCalled();
     expect(cloud.getDeviceInfo).not.toHaveBeenCalled();
     expect(matter.unregisterPlatformAccessories).not.toHaveBeenCalled();

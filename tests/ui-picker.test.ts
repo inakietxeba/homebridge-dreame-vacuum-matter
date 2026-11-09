@@ -26,7 +26,9 @@ async function fixture(config: Record<string, unknown> = {}, devices = robots) {
     updatePluginConfig: vi.fn(async () => undefined),
     savePluginConfig: vi.fn(),
     disableSaveButton: vi.fn(), enableSaveButton: vi.fn(),
-    request: vi.fn(async () => ({ success: true, devices })),
+    request: vi.fn(async (path) => path === '/maps'
+      ? { success: true, maps: [{ mapId: 10, name: 'Ground floor', rooms: [{ id: '1', name: 'Kitchen' }] }] }
+      : { success: true, devices }),
   };
   const picker = await initRobotPicker(homebridge, doc);
   const checkboxes = () => [...doc.querySelectorAll<HTMLInputElement>('input[type=checkbox]')];
@@ -44,11 +46,20 @@ async function fixture(config: Record<string, unknown> = {}, devices = robots) {
 }
 
 describe('Robot name selector', () => {
+  it('names map and room items for the standard form add buttons', () => {
+    const maps = schema.schema.properties.mapOverrides;
+    expect(maps.items.title).toBe('Map');
+    expect(maps.items.properties.rooms.items.title).toBe('Room');
+  });
+
   it('renders account names, saves stable IDs and preserves unrelated settings/blocks', async () => {
     const f = await fixture();
     await f.load();
     expect(f.doc.querySelector('label[for=dreame-robot-0] strong')!.textContent).toBe('Robot A');
     expect(f.doc.querySelector('label[for=dreame-robot-1] strong')!.textContent).toBe('D20');
+    expect(f.doc.querySelector('label[for=dreame-robot-0] small')!.classList.contains('dreame-secondary')).toBe(true);
+    expect(f.doc.querySelector('.text-muted')).toBeNull();
+    expect(f.doc.querySelectorAll('.dreame-help ol li')).toHaveLength(3);
     expect(f.checkboxes().map((input) => input.checked)).toEqual([true, true]);
     f.checkboxes()[1].click();
     await f.picker.flush();
@@ -60,7 +71,7 @@ describe('Robot name selector', () => {
     expect(properties.deviceIds).toBeUndefined();
     expect(properties.deviceSelection).toBeUndefined();
     expect(properties.username).toBeDefined();
-    expect(properties.mapOverrides).toBeDefined();
+    expect(properties.mapOverrides).toBeUndefined();
   });
 
   it('restores saved selection by ID even when names change', async () => {
@@ -146,6 +157,24 @@ describe('Robot name selector', () => {
     await f.load();
     expect(f.homebridge.request).toHaveBeenCalledWith('/robots', { username: 'new@example.com', password: 'fake', country: 'us' });
     expect(f.homebridge.updatePluginConfig.mock.calls.at(-1)![0][0]).toMatchObject({ deviceSelection: 'selected', deviceIds: ['b'], automationDockSwitch: true });
+  });
+
+  it('saves map editor changes through the same configuration queue and preserves them on form changes', async () => {
+    const f = await fixture();
+    await f.load();
+    (f.doc.getElementById('load-maps') as HTMLButtonElement).click();
+    await vi.waitFor(() => expect(f.doc.getElementById('map-0-room-0')).not.toBeNull());
+    const input = f.doc.getElementById('map-0-room-0') as HTMLInputElement;
+    input.value = 'Custom kitchen';
+    input.dispatchEvent(new f.dom.window.Event('input'));
+    await f.picker.flush();
+    f.changeForm({ automationDockSwitch: true, mapOverrides: [] });
+    await f.picker.flush();
+    expect(f.homebridge.updatePluginConfig.mock.calls.at(-1)![0][0]).toMatchObject({
+      automationDockSwitch: true,
+      mapOverrides: [{ mapId: 10, name: 'Upstairs' }, { deviceId: 'a', mapId: 10, name: 'Upstairs', rooms: [{ segmentId: '1', name: 'Custom kitchen' }] }],
+    });
+    expect(f.homebridge.savePluginConfig).not.toHaveBeenCalled();
   });
 
   it('ignores a stale device list when account details change during loading', async () => {

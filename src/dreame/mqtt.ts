@@ -72,7 +72,7 @@ export class DreameMqttClient extends EventEmitter {
       : brokerHost;
 
     const url = `mqtts://${mqttHost}:${brokerPort}`;
-    this.log.debug(`Connecting to MQTT broker ${url}`);
+    this.log.debug('Connecting to MQTT broker');
 
     this.client = mqtt.connect(url, {
       clientId,
@@ -88,15 +88,15 @@ export class DreameMqttClient extends EventEmitter {
     });
 
     this.client.on('connect', () => {
-      this.log.info('Connected to Dreame MQTT broker');
+      this.log.debug('Connected to Dreame MQTT broker');
 
       const topic = `/status/${info.did}/${info.uid}/${info.model}/${info.country}/`;
       this.client!.subscribe(topic, (err) => {
         if (err) {
           this.markDisconnected();
-          this.log.error(`Failed to subscribe to ${topic}: ${err.message}`);
+          this.log.debug('Failed to subscribe to robot status updates.');
         } else {
-          this.log.debug(`Subscribed to ${topic}`);
+          this.log.debug('Subscribed to robot status updates');
           this._connected = true;
           this.emit('connected');
         }
@@ -133,18 +133,18 @@ export class DreameMqttClient extends EventEmitter {
 
     this.client.on('disconnect', () => {
       this.markDisconnected();
-      this.log.warn('Disconnected from MQTT broker');
+      this.log.debug('Disconnected from MQTT broker');
     });
     this.client.on('close', () => this.markDisconnected());
     this.client.on('offline', () => this.markDisconnected());
 
     this.client.on('error', (err: Error & { code?: number }) => {
       this.markDisconnected();
-      this.log.error(`MQTT error: ${err.message}`);
+      this.log.debug(`MQTT transport error${typeof err.code === 'number' ? ` (code ${err.code})` : ''}`);
 
       if ((err.code === 5 || err.message?.includes('Not authorized')) && !this._reconnecting) {
         this._reconnecting = true;
-        this.log.warn('MQTT auth rejected — emitting error for re-login');
+        this.log.debug('MQTT authentication rejected');
         this.emit('error', err);
         this._reconnecting = false;
       }

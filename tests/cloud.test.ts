@@ -24,6 +24,33 @@ describe('DreameCloud', () => {
     globalThis.fetch = originalFetch;
   });
 
+  it.each(['http', 'missing-token', 'invalid-json', 'network'])('does not expose private login response data: %s', async (failure) => {
+    const secret = 'private-account-token-and-email';
+    const response = jsonResponse({ message: secret, refresh_token: secret });
+    if (failure === 'http') response.status = 403;
+    if (failure === 'invalid-json') response.json.mockRejectedValueOnce(new SyntaxError(secret));
+    globalThis.fetch = (failure === 'network'
+      ? vi.fn().mockRejectedValue(new Error(`Connection to https://example.com/?token=${secret} failed`))
+      : vi.fn().mockResolvedValue(response)) as typeof fetch;
+    const log = createMockLogger();
+    const cloud = new DreameCloud(log);
+    const error = await cloud.login('test@example.com', 'fake').catch((err) => err);
+    expect(error).toBeInstanceOf(Error);
+    expect(error.message).not.toContain(secret);
+    expect(JSON.stringify([log.info.mock.calls, log.debug.mock.calls, log.warn.mock.calls, log.error.mock.calls])).not.toContain(secret);
+  });
+
+  it('keeps HTTP diagnostics but does not include API response bodies', async () => {
+    const response = { ...jsonResponse({ token: 'private-token' }), status: 503 };
+    globalThis.fetch = vi.fn().mockResolvedValue(response);
+    const cloud = new DreameCloud(createMockLogger());
+    (cloud as any).accessToken = 'token';
+    (cloud as any).tokenExpireTime = Date.now() + 60_000;
+    await expect(cloud.getDevices()).rejects.toThrow('HTTP 503');
+    expect(response.text).not.toHaveBeenCalled();
+    expect(response.json).not.toHaveBeenCalled();
+  });
+
   it.each([
     { code: -1, data: { result: { code: 0 } } },
     { code: 0, data: { error: { code: -1 } } },

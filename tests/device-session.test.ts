@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { DeviceSession } from '../src/device-session';
 import { createInitialState, NormalizedState } from '../src/dreame/models';
 import { EventEmitter } from 'events';
+import { Logger } from '../src/util/logger';
 
 const identity = { deviceId: 'dev-1', model: 'dreame.vacuum.test', firmware: '1.0' };
 
@@ -40,7 +41,8 @@ function createMockParser() {
 }
 
 function createMockLogger() {
-  return { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() } as any;
+  const sink = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+  return { ...sink, forRobot: (name: string) => new Logger(sink as any, 'DreamePlatform').forRobot(name) } as any;
 }
 
 function createMockCloud() {
@@ -79,6 +81,64 @@ describe('DeviceSession', () => {
   });
 
   describe('MQTT message processing', () => {
+    it('logs unchanged state only once across sources', () => {
+      const session = new DeviceSession('dev-1', 'TestBot', handlers, accessory, parser, log);
+      (session as any).processStateUpdate([{ siid: 2, piid: 1, value: 1 }], 'MQTT');
+      (session as any).processStateUpdate([{ siid: 2, piid: 1, value: 1 }], 'HTTP');
+      expect(log.debug.mock.calls.filter(([m]: string[]) => m.includes('Dreame normalized'))).toHaveLength(1);
+    });
+
+    it('uses the robot context without repeating its name in the message', () => {
+      const session = new DeviceSession('dev-1', 'TestBot', handlers, accessory, parser, log);
+      const mqtt = createMockMqtt();
+      session.connectMqtt(mqtt as any);
+      mqtt.emit('connected');
+      expect(log.info).toHaveBeenCalledWith('[DreamePlatform] [TestBot] MQTT connected');
+      session.dispose();
+    });
+
+    it('logs a genuine state change and keeps deduplication independent for two robots', () => {
+      const first = new DeviceSession('dev-1', 'First', handlers, accessory, parser, log);
+      const second = new DeviceSession('dev-2', 'Second', handlers, accessory, parser, log);
+      const update = [{ siid: 2, piid: 1, value: 1 }];
+      (first as any).processStateUpdate(update, 'HTTP');
+      (second as any).processStateUpdate(update, 'MQTT');
+      const changed = createInitialState(identity);
+      changed.activity.runMode = 'cleaning';
+      parser.processProperties.mockReturnValueOnce(changed);
+      (first as any).processStateUpdate(update, 'MQTT');
+      const messages = log.debug.mock.calls.map(([message]: string[]) => message).filter((message: string) => message.includes('Dreame normalized'));
+      expect(messages).toHaveLength(3);
+      expect(messages[0]).toContain('First');
+      expect(messages[1]).toContain('Second');
+      expect(messages[2]).toContain('cleaning');
+    });
+
+    it.each(['{"private-token":', '"private-token"', '[{"k":"SmartHost","v":"private-token"}]'])('does not expose malformed or non-numeric extended data', (value) => {
+      const session = new DeviceSession('dev-1', 'TestBot', handlers, accessory, parser, log, undefined, true);
+      (session as any).processStateUpdate([{ siid: 4, piid: 50, value }], 'HTTP');
+      expect(JSON.stringify(log.debug.mock.calls)).not.toContain('private-token');
+    });
+
+    it('does not log batch details by default', () => {
+      const session = new DeviceSession('dev-1', 'TestBot', handlers, accessory, parser, log);
+      (session as any).processStateUpdate([{ siid: 2, piid: 1, value: 1 }], 'MQTT');
+      expect(JSON.stringify(log.debug.mock.calls)).not.toContain('Dreame diagnostic');
+    });
+
+    it('limits extended diagnostic output to known numeric properties', () => {
+      const session = new DeviceSession('dev-1', 'TestBot', handlers, accessory, parser, log, undefined, true);
+      (session as any).processStateUpdate([
+        { siid: 2, piid: 1, value: 1 },
+        { siid: 2, piid: 2, value: 'private-token' },
+        { siid: 6, piid: 8, value: 'private-map' },
+        { siid: 4, piid: 50, value: JSON.stringify([{ k: 'SmartHost', v: 2 }, { k: 'secret', v: 'private-token' }]) },
+      ], 'MQTT');
+      const output = JSON.stringify(log.debug.mock.calls);
+      expect(output).toContain('SmartHost');
+      expect(output).not.toContain('private-token');
+      expect(output).not.toContain('private-map');
+    });
     it('should process MQTT properties through parser and accessory', () => {
       const session = new DeviceSession('dev-1', 'TestBot', handlers, accessory, parser, log);
       const mqttClient = createMockMqtt();
@@ -91,7 +151,7 @@ describe('DeviceSession', () => {
       expect(parser.processProperties).toHaveBeenCalledWith(props, accessory.getCurrentState());
       expect(handlers.resolveCleanModeForState).toHaveBeenCalled();
       expect(accessory.onStateUpdate).toHaveBeenCalled();
-      expect(log.debug).toHaveBeenCalledWith(expect.stringContaining('Dreame raw MQTT'));
+      expect(log.debug).toHaveBeenCalledWith(expect.stringContaining('(MQTT)'));
       expect(log.debug).toHaveBeenCalledWith(expect.stringContaining('Dreame normalized'));
     });
 
@@ -117,7 +177,7 @@ describe('DeviceSession', () => {
       session.connectMqtt(mqttClient as any);
       mqttClient.emit('message', [{ siid: 2, piid: 1, value: 1 }]);
 
-      expect(log.error).toHaveBeenCalledWith(expect.stringContaining('parse error'));
+      expect(log.error).toHaveBeenCalledWith(expect.stringContaining('Failed to process MQTT message'));
     });
 
     it('should sync clean mode when it changes', () => {
@@ -140,6 +200,71 @@ describe('DeviceSession', () => {
     });
   });
 
+  it('limits repeated HTTP warnings and reports recovery', async () => {
+    const session = new DeviceSession('dev-1', 'TestBot', handlers, accessory, parser, log);
+    const cloud = createMockCloud();
+    cloud.getProperties.mockRejectedValue(new Error('Dreame get_properties failed with cloud code 80001'));
+    session.setCloud(cloud);
+    for (let i = 0; i < 6; i++) await (session as any).poll();
+    expect(log.warn).toHaveBeenCalledTimes(1);
+    cloud.getProperties.mockRejectedValue(new Error('Dreame get_properties failed with cloud code 80002'));
+    await (session as any).poll();
+    expect(log.warn).toHaveBeenCalledTimes(2);
+    vi.setSystemTime(Date.now() + 300_000);
+    await (session as any).poll();
+    expect(log.warn).toHaveBeenCalledTimes(3);
+    cloud.getProperties.mockResolvedValue([{ siid: 2, piid: 1, value: 6 }]);
+    await (session as any).poll();
+    expect(log.info).toHaveBeenCalledWith(expect.stringContaining('[TestBot] HTTP polling recovered after 8 failures'));
+    session.dispose();
+  });
+
+  it('treats empty and entirely rejected property batches as failed polls', async () => {
+    const session = new DeviceSession('dev-1', 'TestBot', handlers, accessory, parser, log);
+    const cloud = createMockCloud();
+    cloud.getProperties
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ siid: 2, piid: 1, code: -1 }])
+      .mockResolvedValueOnce([{ siid: 2, piid: 1, value: null }]);
+    session.setCloud(cloud);
+    for (let i = 0; i < 3; i++) await (session as any).poll();
+    expect(parser.processProperties).not.toHaveBeenCalled();
+    expect(log.warn).toHaveBeenCalledWith(expect.stringContaining('no readable properties'));
+    await (session as any).poll();
+    expect(log.info).toHaveBeenCalledWith(expect.stringContaining('HTTP polling recovered after 3 failures'));
+    session.dispose();
+  });
+
+  it('warns once during an MQTT disconnect burst and reports recovery', () => {
+    const session = new DeviceSession('dev-1', 'TestBot', handlers, accessory, parser, log);
+    const mqtt = createMockMqtt();
+    session.connectMqtt(mqtt as any);
+    mqtt.emit('connected');
+    mqtt.emit('disconnected');
+    mqtt.emit('disconnected');
+    mqtt.emit('error', new Error('private-token'));
+    expect(log.warn).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(log.warn.mock.calls)).not.toContain('private-token');
+    mqtt.emit('connected');
+    expect(log.info).toHaveBeenCalledWith(expect.stringContaining('reconnected'));
+    session.dispose();
+    expect(log.warn).toHaveBeenCalledTimes(1);
+  });
+
+  it('reports MQTT authentication failure once without revealing the response', () => {
+    const session = new DeviceSession('dev-1', 'TestBot', handlers, accessory, parser, log);
+    const mqtt = createMockMqtt();
+    session.connectMqtt(mqtt as any);
+    mqtt.emit('disconnected');
+    const error = Object.assign(new Error('Not authorized private-token'), { code: 5 });
+    mqtt.emit('error', error);
+    mqtt.emit('error', error);
+    expect(log.error).toHaveBeenCalledTimes(1);
+    expect(log.error).toHaveBeenCalledWith(expect.stringContaining('MQTT authentication failed'));
+    expect(JSON.stringify(log.error.mock.calls)).not.toContain('private-token');
+    session.dispose();
+  });
+
   describe('MQTT connection events', () => {
     it('should track MQTT connected state', () => {
       const session = new DeviceSession('dev-1', 'TestBot', handlers, accessory, parser, log);
@@ -158,7 +283,7 @@ describe('DeviceSession', () => {
       session.connectMqtt(mqttClient as any);
       mqttClient.emit('error', new Error('connection lost'));
 
-      expect(log.error).toHaveBeenCalledWith(expect.stringContaining('connection lost'));
+      expect(log.warn).toHaveBeenCalledWith(expect.stringContaining('HTTP polling remains active'));
     });
 
     it('should disconnect the previous MQTT client before replacing it', () => {
@@ -216,7 +341,7 @@ describe('DeviceSession', () => {
         expect(parser.processProperties).toHaveBeenCalled();
       });
       expect(accessory.onStateUpdate).toHaveBeenCalled();
-      expect(log.debug).toHaveBeenCalledWith(expect.stringContaining('Dreame raw HTTP'));
+      expect(log.debug).toHaveBeenCalledWith(expect.stringContaining('(HTTP)'));
     });
 
     it('should use shorter interval when cleaning without MQTT', async () => {

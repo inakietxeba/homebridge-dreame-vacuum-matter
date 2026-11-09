@@ -38,10 +38,17 @@ Or search for `homebridge-dreame-vacuum-matter` in the Homebridge UI.
 
 Homebridge publishes each robot as an **external Matter accessory**, with its own
 QR/manual pairing code. In Apple Home, add the vacuum using that robot's code from
-Homebridge's Matter accessory information or external-accessory startup logs.
+the plugin's **External Accessories** menu in Homebridge.
 Do **not** reuse the main Matter bridge code or the HAP/HomeKit code. Pairing the
 main bridge alone does not pair the vacuum. HAP is not required for vacuum control;
 it is only used by the optional automation helpers.
+
+To find each robot's pairing code:
+
+1. Save the plugin configuration and restart Homebridge so the robot is published.
+2. Open **Plugins** in the Homebridge UI and find **Dreame Vacuum Matter**.
+3. Open the plugin's **three-dot menu**, choose **External Accessories**, then select your vacuum to view its own Matter QR/manual pairing code.
+4. In Apple Home, choose **Add Accessory** and scan that QR code or enter its manual code. Repeat for each robot you want to add.
 
 Use current Apple software; [robot vacuum support was introduced in iOS 18.4](https://support.apple.com/en-ie/121161).
 If pairing still times out with the correct code, check IPv6/mDNS reachability between
@@ -81,6 +88,7 @@ logs around the attempt. Redact pairing codes, credentials, tokens and personal 
 | `deviceIds` | `[]` | Robot IDs to expose when `deviceSelection` is `selected`; an empty list exposes none |
 | `automationContactSensors` | `false` | Create HomeKit contact sensors for Apple Home automations. Disabling later removes these sensors |
 | `automationDockSwitch` | `false` | Create a momentary HomeKit switch that sends the vacuum back to its dock |
+| `diagnosticLogging` | `false` | Temporarily include selected technical values in Homebridge debug logs |
 | `mapOverrides` | `[]` | Replace discovered floor/map and room names, optionally scoped by device ID |
 
 In Homebridge's plugin Settings, enter your account details and click **Load robots**.
@@ -88,6 +96,9 @@ The list shows each robot by its Dreamehome name, with checkboxes. Uncheck a rob
 switch to **Only the robots checked below**, or choose **All robots** / **No robots**.
 Save and restart Homebridge to apply. Loading the list alone does not change the selection.
 Names can change without breaking selection because stable IDs are stored internally.
+Extended diagnostic logging is disabled by default. Enable it only temporarily when
+troubleshooting, together with Homebridge debug logging; it records selected numeric
+device properties, not account credentials or pairing codes. Disable it afterwards.
 Server-side `DREAME_EMAIL` / `DREAME_PASSWORD` variables are also supported for discovery;
 credentials and cloud tokens are never returned with the device list. The picker only
 queries the account: it does not start cleaning or change robot settings.
@@ -106,8 +117,8 @@ Dreamehome. Re-enabling a removed robot may require pairing it in Apple Home aga
 restoring its room/automation assignments; this is not a temporary visibility toggle.
 Unknown selected IDs or an empty cloud discovery leave cached accessories unchanged.
 If a saved selection is missing from the fetched list, the UI preserves it until you
-explicitly uncheck it. For manual configuration, use IDs, not display names; the startup
-log lists each robot's ID. Changes to other plugin settings preserve the robot selection.
+explicitly uncheck it. For manual configuration, use IDs, not display names; the robot
+picker shows each robot's ID. Changes to other plugin settings preserve the robot selection.
 
 Automatic and Quiet cleaning profiles are always available; no experimental setting is needed.
 For vacuum-only, Automatic uses normal suction with CleanGenius off. For vacuum-and-mop,
@@ -147,7 +158,22 @@ Rooms from different maps cannot be combined in a single task. If the map change
 fails or cannot be confirmed, cleaning is not started. Older robots that do not
 report the selected map may not support this workflow.
 
-Room names can be overridden using the segment and map IDs printed in debug logs:
+### Map and Room Names
+
+In the plugin's custom settings, use **Load robots**, choose a robot under
+**Map and room names**, then click **Load maps and rooms**. The editor shows the
+names discovered from Dreamehome and any saved custom names. Enter only the names
+you want this plugin to expose in Apple Home; leave a field blank to use the robot's
+original name. Save and restart Homebridge to apply. This does not rename anything
+in Dreamehome, switch the active map, or start cleaning.
+
+Custom names are scoped to each robot and saved map, so repeated room IDs on
+different floors or robots stay independent. Loading, empty results and connection
+failures do not remove saved overrides, including maps or rooms not currently
+returned by Dreame. Existing unscoped JSON overrides remain supported; editing one
+creates a robot-specific override without changing the defaults for other robots.
+
+The equivalent advanced JSON configuration is:
 
 ```json
 "mapOverrides": [

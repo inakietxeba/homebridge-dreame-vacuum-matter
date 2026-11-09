@@ -71,11 +71,18 @@
         "default": false,
         "description": "Expose an optional momentary HomeKit switch that sends the vacuum back to its dock. Use it as an action in classic HomeKit automations."
       },
+      "diagnosticLogging": {
+        "title": "Extended Diagnostic Logging",
+        "type": "boolean",
+        "default": false,
+        "description": "Temporarily log selected technical properties for troubleshooting. Requires Homebridge debug logging."
+      },
       "mapOverrides": {
         "title": "Map and Room Name Overrides",
         "type": "array",
-        "description": "Optionally rename discovered Dreame floors/maps and their rooms. Map and segment IDs are shown in the startup log.",
+        "description": "Optionally rename discovered Dreame floors/maps and their rooms. Use the map and room editor in plugin settings. IDs for advanced JSON configuration are available in debug logs.",
         "items": {
+          "title": "Map",
           "type": "object",
           "properties": {
             "mapId": {
@@ -98,6 +105,7 @@
               "title": "Rooms",
               "type": "array",
               "items": {
+                "title": "Room",
                 "type": "object",
                 "properties": {
                   "segmentId": {

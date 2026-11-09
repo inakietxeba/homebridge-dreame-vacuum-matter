@@ -41,11 +41,16 @@ describe('Config', () => {
     expect(config.username).toBe('test@example.com');
     expect(config.password).toBe('secret');
     expect(config.automationDockSwitch).toBe(false);
+    expect(config.diagnosticLogging).toBe(false);
     expect(config.mapOverrides).toEqual([]);
 
     // Restore
     if (savedEmail) process.env['DREAME_EMAIL'] = savedEmail;
     if (savedPassword) process.env['DREAME_PASSWORD'] = savedPassword;
+  });
+
+  it('accepts the opt-in extended diagnostics flag', () => {
+    expect(parsePlatformConfig({ platform: 'DreameVacuumMatter', diagnosticLogging: true } as any).diagnosticLogging).toBe(true);
   });
 
   it('should accept env var overrides', () => {

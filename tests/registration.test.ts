@@ -90,13 +90,38 @@ describe('Matter command state updates', () => {
     expect(updateAccessoryState).toHaveBeenCalledWith('matter-uuid', 'rvcOperationalState', { operationalState: 0x01 });
   });
 
-  it('should mark the robot as returning and seeking its charger', async () => {
+  it('reports the dock command with idle run mode and seeking-charger state', async () => {
     const { accessory, handlers, updateAccessoryState } = createFixture();
 
     await (accessory.handlers as any).rvcOperationalState.goHome();
 
     expect(handlers.handleGoHomeCommand).toHaveBeenCalledOnce();
-    expect(updateAccessoryState).toHaveBeenCalledWith('matter-uuid', 'rvcRunMode', { currentMode: 0x02 });
+    expect(updateAccessoryState).toHaveBeenCalledWith('matter-uuid', 'rvcRunMode', { currentMode: 0x00 });
     expect(updateAccessoryState).toHaveBeenCalledWith('matter-uuid', 'rvcOperationalState', { operationalState: 0x40 });
+  });
+
+  it.each([0x02, 0x03, 0xff])('rejects unsupported run mode command %s', async (newMode) => {
+    const { accessory, handlers, updateAccessoryState } = createFixture();
+
+    await expect((accessory.handlers as any).rvcRunMode.changeToMode({ newMode })).rejects.toThrow('Unsupported Dreame run mode');
+
+    expect(handlers.handleGoHomeCommand).not.toHaveBeenCalled();
+    expect(updateAccessoryState).not.toHaveBeenCalled();
+  });
+
+  it('rejects malformed selections without clearing existing rooms', async () => {
+    const { accessory, handlers, updateAccessoryState } = createFixture();
+    await expect((accessory.handlers as any).serviceArea.selectAreas({ newAreas: [1, '2'] })).rejects.toThrow('Invalid Matter area selection');
+    expect(handlers.handleAreaSelection).not.toHaveBeenCalled();
+    expect(updateAccessoryState).not.toHaveBeenCalled();
+  });
+
+  it('sends each area only once and still accepts explicit empty selections', async () => {
+    const { accessory, handlers, updateAccessoryState } = createFixture();
+    await (accessory.handlers as any).serviceArea.selectAreas({ newAreas: [3, 3, 1] });
+    expect(handlers.handleAreaSelection).toHaveBeenLastCalledWith([3, 1]);
+    expect(updateAccessoryState).toHaveBeenLastCalledWith('matter-uuid', 'serviceArea', { selectedAreas: [3, 1] });
+    await (accessory.handlers as any).serviceArea.selectAreas({ newAreas: [] });
+    expect(handlers.handleAreaSelection).toHaveBeenLastCalledWith([]);
   });
 });

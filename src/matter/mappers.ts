@@ -23,7 +23,6 @@ export enum MatterOperationalState {
 export enum MatterRvcRunMode {
   IDLE = 0x00,
   CLEANING = 0x01,
-  RETURNING_HOME = 0x02,
   MAPPING = 0x03,
 }
 
@@ -177,7 +176,6 @@ export class MatterMappers {
   private static readonly SUPPORTED_RUN_MODES = [
     { label: 'Idle', mode: MatterRvcRunMode.IDLE, modeTags: [{ value: MatterRvcRunModeTag.IDLE }] },
     { label: 'Cleaning', mode: MatterRvcRunMode.CLEANING, modeTags: [{ value: MatterRvcRunModeTag.CLEANING }] },
-    { label: 'Returning Home', mode: MatterRvcRunMode.RETURNING_HOME, modeTags: [] },
     { label: 'Mapping', mode: MatterRvcRunMode.MAPPING, modeTags: [{ value: MatterRvcRunModeTag.MAPPING }] },
   ];
 
@@ -251,7 +249,8 @@ export class MatterMappers {
 
     switch (state.activity.runMode) {
       case 'cleaning': return MatterRvcRunMode.CLEANING;
-      case 'returning': return MatterRvcRunMode.RETURNING_HOME;
+      // Returning to the dock is reported through the operational state.
+      case 'returning': return MatterRvcRunMode.IDLE;
       case 'mapping': return MatterRvcRunMode.MAPPING;
       case 'maintenance': return state.activity.maintenanceType
         ? MatterRvcRunMode.CLEANING

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { MatterMappers } from '../src/matter/mappers';
+import { MatterMappers, MatterOperationalState, MatterRvcRunMode } from '../src/matter/mappers';
 import { MatterClusterMapper } from '../src/matter/clusters';
 import { createInitialState } from '../src/dreame/models';
 
@@ -67,11 +67,19 @@ describe('MatterMappers', () => {
     expect(MatterMappers.mapOperationalState(state)).toBe(0x44); // CLEANING_MOP
   });
 
-  it('should map returning to SEEKING_CHARGER', () => {
+  it('reports returning through the operational state, with a supported idle run mode', () => {
     const state = createInitialState(identity);
     state.activity.runMode = 'returning';
-    const result = MatterMappers.mapOperationalState(state);
-    expect(result).toBe(0x40); // SEEKING_CHARGER
+    const clusters = MatterClusterMapper.toMatterState(state);
+    expect(clusters.RvcOperationalState.operationalState).toBe(MatterOperationalState.SEEKING_CHARGER);
+    expect(clusters.RvcRunMode.currentMode).toBe(MatterRvcRunMode.IDLE);
+    expect(MatterMappers.getSupportedRunModes().map(({ mode }) => mode)).toEqual([
+      MatterRvcRunMode.IDLE, MatterRvcRunMode.CLEANING, MatterRvcRunMode.MAPPING,
+    ]);
+    for (const { modeTags } of MatterMappers.getSupportedRunModes()) {
+      expect(modeTags.length).toBeGreaterThanOrEqual(1);
+      expect(modeTags.length).toBeLessThanOrEqual(8);
+    }
   });
 
   it('should map paused to PAUSED', () => {

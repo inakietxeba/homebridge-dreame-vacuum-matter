@@ -1,8 +1,9 @@
 import type { API, MatterAccessory, MatterAPI } from 'homebridge';
 import { CleaningMode } from './config.js';
-import { Logger } from './util/logger.js';
+import { Logger, safeError } from './util/logger.js';
 import { MatterCommandHandlers } from './matter/handlers.js';
 import { MatterClusterMapper } from './matter/clusters.js';
+import { MatterOperationalState, MatterRvcRunMode } from './matter/mappers.js';
 import { NormalizedState, Identity } from './dreame/models.js';
 
 const PLUGIN_NAME = 'homebridge-dreame-vacuum-matter';
@@ -23,16 +24,15 @@ type WrapHandlerFn = <T extends unknown[]>(
 ) => (...args: T) => Promise<void>;
 
 function extractAreaIds(request: unknown): number[] {
-  if (Array.isArray(request)) {
-    return request.filter((value): value is number => typeof value === 'number' && Number.isFinite(value));
+  const record = request && typeof request === 'object' ? request as Record<string, unknown> : {};
+  const areas = Array.isArray(request)
+    ? request
+    : record['newAreas'] ?? record['selectedAreas'] ?? record['areas'] ?? record['areaIds'];
+  if (!Array.isArray(areas)
+    || !areas.every((id): id is number => Number.isInteger(id) && id >= 0 && id <= 0xffffffff)) {
+    throw new Error('Invalid Matter area selection');
   }
-  if (!request || typeof request !== 'object') return [];
-
-  const record = request as Record<string, unknown>;
-  const areas = record['newAreas'] ?? record['selectedAreas'] ?? record['areas'] ?? record['areaIds'];
-  return Array.isArray(areas)
-    ? areas.filter((value): value is number => typeof value === 'number' && Number.isFinite(value))
-    : [];
+  return [...new Set(areas)];
 }
 
 function buildHandlers(
@@ -62,20 +62,16 @@ function buildHandlers(
     rvcRunMode: {
       changeToMode: wrapHandler('rvcRunMode.changeToMode', async (request?: { newMode?: number }) => {
         switch (request?.newMode) {
-          case 0x00: await handlers.handleStopCommand(); break;
-          case 0x01: await handlers.handleStartCommand(false); break;
-          case 0x02: await handlers.handleGoHomeCommand(); break;
-          default: log.warn(`Unknown rvcRunMode: ${request?.newMode}`); return;
-        }
-        // Command handlers must update both clusters immediately. Otherwise
-        // controllers can show "Ready" while the robot is already cleaning.
-        if (request?.newMode !== undefined) {
-          const operationalState = request.newMode === 0x00
-            ? 0x00 // Stopped
-            : request.newMode === 0x01
-              ? 0x01 // Running
-              : 0x40; // Seeking charger
-          await updateRunAndOperationalState(request.newMode, operationalState);
+          case MatterRvcRunMode.IDLE:
+            await handlers.handleStopCommand();
+            await updateRunAndOperationalState(MatterRvcRunMode.IDLE, MatterOperationalState.STOPPED);
+            break;
+          case MatterRvcRunMode.CLEANING:
+            await handlers.handleStartCommand(false);
+            // Update both clusters so controllers do not keep showing Ready.
+            await updateRunAndOperationalState(MatterRvcRunMode.CLEANING, MatterOperationalState.RUNNING);
+            break;
+          default: throw new Error(`Unsupported Dreame run mode command: ${request?.newMode}`);
         }
       }),
     },
@@ -95,7 +91,7 @@ function buildHandlers(
       }),
       goHome: wrapHandler('rvcOperationalState.goHome', async () => {
         await handlers.handleGoHomeCommand();
-        await updateRunAndOperationalState(0x02, 0x40);
+        await updateRunAndOperationalState(MatterRvcRunMode.IDLE, MatterOperationalState.SEEKING_CHARGER);
       }),
     },
     rvcCleanMode: {
@@ -129,7 +125,7 @@ function buildHandlers(
     serviceArea: {
       selectAreas: wrapHandler('serviceArea.selectAreas', async (request?: unknown) => {
         const areaIds = extractAreaIds(request);
-        log.debug(`Matter ServiceArea selectAreas raw request: ${JSON.stringify(request ?? null)}`);
+        log.debug(`Matter ServiceArea selectAreas: [${areaIds.join(', ')}]`);
         await handlers.handleAreaSelection(areaIds);
         if (matter.updateAccessoryState) {
           await matter.updateAccessoryState(uuid, cn?.ServiceArea ?? 'serviceArea', {
@@ -186,7 +182,7 @@ export function buildMatterAccessory(
       try {
         await fn(...args);
       } catch (error: unknown) {
-        const message = error instanceof Error ? error.message : String(error);
+        const message = safeError(error);
         log.error(`Matter command ${name} failed: ${message}`);
         throw error;
       }
@@ -195,7 +191,7 @@ export function buildMatterAccessory(
 
   const accessoryHandlers = buildHandlers(handlers, matter, uuid, log, wrapHandler);
 
-  log.debug(`Building MatterAccessory: uuid=${uuid}, clusters=${Object.keys(clusters).join(', ')}`);
+  log.debug(`Building Matter accessory; clusters=${Object.keys(clusters).join(', ')}`);
 
   const accessory: MatterAccessory = {
     UUID: uuid,
@@ -236,7 +232,7 @@ export function reattachHandlers(
       try {
         await fn(...args);
       } catch (error: unknown) {
-        const message = error instanceof Error ? error.message : String(error);
+        const message = safeError(error);
         log.error(`Matter command ${name} failed: ${message}`);
         throw error;
       }
@@ -245,7 +241,7 @@ export function reattachHandlers(
 
   accessory.handlers = buildHandlers(handlers, matter, accessory.UUID, log, wrapHandler) as MatterAccessory['handlers'];
 
-  log.debug(`Re-attached handlers for cached accessory: ${accessory.displayName}`);
+  log.debug('Re-attached handlers for cached accessory');
 }
 
 /**
@@ -260,11 +256,11 @@ export async function registerNewMatterAccessory(
   log: Logger,
 ): Promise<RegistrationResult> {
   try {
-    log.info(`Registering new Matter accessory: ${accessory.displayName} (UUID=${accessory.UUID})`);
+    // Homebridge may log an external publish failure without rejecting this call.
+    log.debug('Requesting external Matter accessory registration');
     await matter.registerPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [accessory]);
-    log.info(`Registered Matter accessory: ${accessory.displayName}`);
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : String(err);
+    const message = safeError(err);
     log.error(`Failed to register Matter accessory: ${message}`);
     return { configured: false, statePushSupported: false };
   }
@@ -282,9 +278,9 @@ export async function updateCachedMatterAccessory(
     // RoboticVacuumCleaner accessories are published as external Matter
     // bridges by Homebridge. Their cache is owned by the dedicated external
     // server, so there is no bridged platform cache to update here.
-    log.debug(`Reusing cached external Matter accessory: ${accessory.displayName}`);
+    log.debug('Reusing cached external Matter accessory');
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : String(err);
+    const message = safeError(err);
     log.error(`Failed to update Matter accessory: ${message}`);
     return { configured: false, statePushSupported: false };
   }

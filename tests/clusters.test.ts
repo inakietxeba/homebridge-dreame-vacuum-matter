@@ -176,6 +176,41 @@ describe('MatterClusterMapper', () => {
       expect(result!.supportedMaps).toHaveLength(1);
       expect(result!.supportedMaps[0]!.mapId).toBe(200);
     });
+
+    it('caps the Matter catalog and keeps the reverse routing identical to published areas', () => {
+      const state = createInitialState(identity);
+      const rooms = Array.from({ length: 256 }, (_, index) => ({ id: String(index + 1), name: 'Room' }));
+      state.activity.knownMaps = [
+        { mapId: -1, rooms },
+        { mapId: 100, rooms },
+        { mapId: 200, rooms },
+      ];
+      state.activity.selectedAreaIds = [1, 1, 255, 256];
+      const result = MatterClusterMapper.buildServiceArea(state)!;
+      expect(result.supportedMaps.map(({ mapId }) => mapId)).toEqual([100]);
+      expect(result.supportedAreas).toHaveLength(255);
+      expect(result.selectedAreas).toEqual([1, 255]);
+      const targets = MatterClusterMapper.buildAreaIdToRoomTargetMap(state);
+      expect([...targets.keys()]).toEqual(result.supportedAreas.map(({ areaId }) => areaId));
+    });
+
+    it('disambiguates names after UTF-8 truncation without changing room routing', () => {
+      const state = createInitialState(identity);
+      const name = '\u{1f600}'.repeat(65);
+      state.activity.knownMaps = [
+        { mapId: 100, name, rooms: [{ id: '1', name }, { id: '2', name }] },
+        { mapId: 200, name, rooms: [{ id: '1', name }] },
+      ];
+      const result = MatterClusterMapper.buildServiceArea(state)!;
+      expect(result.supportedMaps.map(({ name }) => Buffer.byteLength(name))).toEqual([64, 64]);
+      expect(new Set(result.supportedMaps.map(({ name }) => name)).size).toBe(2);
+      const names = result.supportedAreas.map(({ areaInfo }) => areaInfo.locationInfo!.locationName);
+      expect(names.map((name) => Buffer.byteLength(name))).toEqual([128, 128, 128]);
+      expect(names[0]).not.toBe(names[1]);
+      expect(names[0]).toBe(names[2]);
+      expect(MatterClusterMapper.buildAreaIdToRoomTargetMap(state).get(result.supportedAreas[2]!.areaId))
+        .toMatchObject({ mapId: 200, segmentId: '1' });
+    });
   });
 
   describe('toMatterState', () => {

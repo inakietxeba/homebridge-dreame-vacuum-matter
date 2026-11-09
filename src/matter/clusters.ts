@@ -49,10 +49,36 @@ export interface MatterState {
 }
 
 const NON_NUMERIC_AREA_OFFSET = 0x10000;
+const MAX_UINT32 = 0xffffffff;
+const MAX_SUPPORTED_AREAS = 255;
+const MAP_NAME_BYTES = 64;
+const ROOM_NAME_BYTES = 128;
+
+function truncateUtf8(value: string, limit: number): string {
+  let result = '';
+  let bytes = 0;
+  for (const char of value) {
+    bytes += Buffer.byteLength(char);
+    if (bytes > limit) break;
+    result += char;
+  }
+  return result;
+}
+
+function uniqueName(name: string | undefined, fallback: string, limit: number, used: Set<string>): string {
+  const base = typeof name === 'string' ? name.trim() || fallback : fallback;
+  let candidate = truncateUtf8(base, limit);
+  for (let index = 2; used.has(candidate); index++) {
+    const suffix = ` (${index})`;
+    candidate = truncateUtf8(base, limit - suffix.length) + suffix;
+  }
+  used.add(candidate);
+  return candidate;
+}
 
 function getStableAreaId(roomId: string, fallbackIndex: number, usedAreaIds: Set<number>): number {
   const parsed = Number.parseInt(roomId, 10);
-  if (Number.isFinite(parsed) && parsed > 0 && !usedAreaIds.has(parsed)) {
+  if (parsed > 0 && parsed <= MAX_UINT32 && !usedAreaIds.has(parsed)) {
     usedAreaIds.add(parsed);
     return parsed;
   }
@@ -66,74 +92,61 @@ function getStableAreaId(roomId: string, fallbackIndex: number, usedAreaIds: Set
 }
 
 export class MatterClusterMapper {
-  public static buildServiceArea(state: NormalizedState): ServiceAreaPayload | undefined {
-    const knownMaps = state.activity.knownMaps ?? [];
-    const mapsWithRooms = knownMaps
-      .map((m) => ({ ...m, rooms: MatterClusterMapper.normalizeRooms(m.rooms) }))
-      .filter((m) => m.rooms.length > 0);
-
-    const useMapMode = mapsWithRooms.length > 0;
-
-    let supportedMaps: SupportedMap[] = [];
-    let supportedAreas: SupportedArea[] = [];
+  private static buildAreaCatalog(state: NormalizedState) {
+    const supportedMaps: SupportedMap[] = [];
+    const supportedAreas: SupportedArea[] = [];
     const areaTargets: DreameAreaTarget[] = [];
-
-    if (useMapMode) {
-      supportedMaps = mapsWithRooms.map((m, index) => ({
-        mapId: m.mapId,
-        name: m.name?.trim() || `Floor ${index + 1}`,
-      }));
-
-      let globalIndex = 0;
-      const usedAreaIds = new Set<number>();
-      for (const map of mapsWithRooms) {
-        for (const room of map.rooms) {
-          const areaId = getStableAreaId(room.id, globalIndex, usedAreaIds);
-          const trimmedName = (room.name ?? '').trim();
-          supportedAreas.push({
-            areaId,
-            mapId: map.mapId,
-            areaInfo: {
-              locationInfo: {
-                locationName: trimmedName.length > 0 ? trimmedName : `Room ${areaId}`,
-                floorNumber: null,
-                areaType: null,
-              },
-              landmarkInfo: null,
-            },
-          });
-          areaTargets.push({ areaId, mapId: map.mapId, segmentId: room.id });
-          globalIndex += 1;
-        }
-      }
-    } else {
-      const rooms = MatterClusterMapper.normalizeRooms(state.activity.availableRooms);
-      if (rooms.length === 0) return undefined;
-
-      const usedAreaIds = new Set<number>();
-      supportedAreas = rooms.map((room, index) => {
-        const areaId = getStableAreaId(room.id, index, usedAreaIds);
-        const trimmedName = (room.name ?? '').trim();
-        areaTargets.push({ areaId, mapId: null, segmentId: room.id });
-        return {
+    const usedAreaIds = new Set<number>();
+    const usedMapIds = new Set<number>();
+    const usedMapNames = new Set<string>();
+    const addRooms = (rooms: RoomInfo[], mapId: number | null) => {
+      const usedRoomNames = new Set<string>();
+      const usedSegments = new Set<string>();
+      for (const room of rooms) {
+        if (supportedAreas.length >= MAX_SUPPORTED_AREAS) break;
+        if (usedSegments.has(room.id)) continue;
+        usedSegments.add(room.id);
+        const areaId = getStableAreaId(room.id, supportedAreas.length, usedAreaIds);
+        areaTargets.push({ areaId, mapId, segmentId: room.id });
+        supportedAreas.push({
           areaId,
-          mapId: null,
+          mapId,
           areaInfo: {
             locationInfo: {
-              locationName: trimmedName.length > 0 ? trimmedName : `Room ${areaId}`,
+              locationName: uniqueName(room.name, `Room ${areaId}`, ROOM_NAME_BYTES, usedRoomNames),
               floorNumber: null,
               areaType: null,
             },
             landmarkInfo: null,
           },
-        };
-      });
-    }
+        });
+      }
+    };
 
+    for (const map of state.activity.knownMaps ?? []) {
+      if (supportedAreas.length >= MAX_SUPPORTED_AREAS) break;
+      const { mapId } = map;
+      if (!Number.isInteger(mapId) || mapId < 0 || mapId > MAX_UINT32 || usedMapIds.has(mapId)) continue;
+      const rooms = MatterClusterMapper.normalizeRooms(map.rooms);
+      if (rooms.length === 0) continue;
+      usedMapIds.add(mapId);
+      supportedMaps.push({
+        mapId,
+        name: uniqueName(map.name, `Floor ${supportedMaps.length + 1}`, MAP_NAME_BYTES, usedMapNames),
+      });
+      addRooms(rooms, mapId);
+    }
+    if (supportedMaps.length === 0) addRooms(MatterClusterMapper.normalizeRooms(state.activity.availableRooms), null);
+    return { supportedMaps, supportedAreas, areaTargets };
+  }
+
+  public static buildServiceArea(state: NormalizedState): ServiceAreaPayload | undefined {
+    const { supportedMaps, supportedAreas, areaTargets } = MatterClusterMapper.buildAreaCatalog(state);
     if (supportedAreas.length === 0) return undefined;
+    const useMapMode = supportedMaps.length > 0;
 
     const selectedSource = Array.isArray(state.activity.selectedRooms) ? state.activity.selectedRooms : [];
-    const selectedAreas = state.activity.selectedAreaIds !== undefined
+    const selectedAreas = [...new Set(state.activity.selectedAreaIds !== undefined
       ? state.activity.selectedAreaIds.filter((id) => areaTargets.some((target) => target.areaId === id))
       : selectedSource
       .map((segmentId) => {
@@ -146,7 +159,7 @@ export class MatterClusterMapper {
         // Without an active map, only expose selections whose segment ID is unambiguous.
         return candidates.length === 1 ? candidates[0]?.areaId : undefined;
       })
-      .filter((areaId): areaId is number => areaId !== undefined);
+      .filter((areaId): areaId is number => areaId !== undefined))];
 
     // currentArea: the first selected room being actively cleaned, or null
     const currentArea = (state.activity.runMode === 'cleaning' && selectedAreas.length > 0)
@@ -195,28 +208,7 @@ export class MatterClusterMapper {
 
   /** Builds a reverse mapping from Matter areaId to its Dreame map and segment. */
   public static buildAreaIdToRoomTargetMap(state: NormalizedState): Map<number, DreameAreaTarget> {
-    const result = new Map<number, DreameAreaTarget>();
-    const serviceArea = MatterClusterMapper.buildServiceArea(state);
-    if (!serviceArea) return result;
-
-    const knownMaps = state.activity.knownMaps ?? [];
-    const mapsWithRooms = knownMaps
-      .map((m) => ({ ...m, rooms: MatterClusterMapper.normalizeRooms(m.rooms) }))
-      .filter((m) => m.rooms.length > 0);
-
-    const roomTargets = mapsWithRooms.length > 0
-      ? mapsWithRooms.flatMap((map) => map.rooms.map((room) => ({ mapId: map.mapId, room })))
-      : MatterClusterMapper.normalizeRooms(state.activity.availableRooms).map((room) => ({ mapId: null, room }));
-
-    let globalIndex = 0;
-    const usedAreaIds = new Set<number>();
-    for (const { mapId, room } of roomTargets) {
-      const areaId = getStableAreaId(room.id, globalIndex, usedAreaIds);
-      result.set(areaId, { areaId, mapId, segmentId: room.id });
-      globalIndex += 1;
-    }
-
-    return result;
+    return new Map(MatterClusterMapper.buildAreaCatalog(state).areaTargets.map((target) => [target.areaId, target]));
   }
 
   /** Compatibility helper for consumers that only need the Dreame segment ID. */

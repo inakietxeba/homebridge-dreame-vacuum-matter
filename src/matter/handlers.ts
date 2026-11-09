@@ -1,10 +1,11 @@
 import { DreameCloud } from '../dreame/cloud.js';
-import { Logger } from '../util/logger.js';
+import { Logger, safeError } from '../util/logger.js';
 import { CleaningMode, CleaningProfile } from '../config.js';
 import { DREAME_STATUS, MIOT, SuctionLevel, WaterLevel } from '../dreame/models.js';
 import { DreameCleaningModeCodec } from '../dreame/cleaning-mode.js';
 import { DreameAreaTarget } from './clusters.js';
 import { DreameCapabilities } from '../dreame/capabilities.js';
+import type { DreameMapState } from '../dreame/maps.js';
 
 class TemporalSuppression {
   private until = 0;
@@ -28,14 +29,14 @@ export class MatterCommandHandlers {
   private pendingAreas: DreameAreaTarget[] | null = null;
   private areaIdToRoomTargetMap = new Map<number, DreameAreaTarget>();
   private currentMapId: number | undefined;
-  private mapStateProvider?: () => Promise<number | undefined>;
+  private mapStateProvider?: () => Promise<DreameMapState>;
   private capabilities?: DreameCapabilities;
   private cleaningSelectionExplicit = false;
 
   constructor(
     private cloud: DreameCloud | null,
     private readonly deviceId: string,
-    private readonly log: Logger,
+    private log: Logger,
     defaultCleanMode: CleaningMode = 'SWEEP_AND_MOP',
     private cleaningModeCodec = new DreameCleaningModeCodec(),
   ) {
@@ -46,6 +47,8 @@ export class MatterCommandHandlers {
   public setCloud(cloud: DreameCloud): void {
     this.cloud = cloud;
   }
+
+  public setLogger(log: Logger): void { this.log = log; }
 
   public setCleaningModeCodec(codec: DreameCleaningModeCodec): void {
     this.cleaningModeCodec = codec;
@@ -92,7 +95,7 @@ export class MatterCommandHandlers {
     this.currentMapId = mapId;
   }
 
-  public setMapStateProvider(provider: () => Promise<number | undefined>): void {
+  public setMapStateProvider(provider: () => Promise<DreameMapState>): void {
     this.mapStateProvider = provider;
   }
 
@@ -204,7 +207,7 @@ export class MatterCommandHandlers {
     try {
       this.onAreaSelectionChanged?.(areaIds.map(String));
     } catch (err: unknown) {
-      this.log.warn(`Failed to apply area selection to accessory state: ${err instanceof Error ? err.message : String(err)}`);
+      this.log.warn(`Failed to apply area selection to accessory state: ${safeError(err)}`);
     }
   }
 
@@ -219,8 +222,17 @@ export class MatterCommandHandlers {
     this.assertAreasShareMap(areas);
     const targetMapId = areas.find((area) => area.mapId !== null)?.mapId;
     if (targetMapId === undefined || targetMapId === null) return;
-    if (this.mapStateProvider) {
-      this.currentMapId = await this.mapStateProvider();
+    const readMapState = this.mapStateProvider;
+    if (readMapState) {
+      const refreshActiveMap = async () => {
+        const { maps, currentMapId } = await readMapState();
+        const targetMap = maps.find(({ mapId }) => mapId === targetMapId);
+        if (!targetMap || !areas.every(({ segmentId }) => targetMap.rooms.some(({ id }) => id === segmentId))) {
+          throw new Error('Selected Dreame rooms no longer match the saved map; restart Homebridge to reload the rooms');
+        }
+        this.currentMapId = currentMapId;
+      };
+      await refreshActiveMap();
       if (this.currentMapId === targetMapId) return;
       this.log.info(`Selecting Dreame map ${targetMapId} before room cleaning`);
       const result = await this.requireCloud().action(this.deviceId, MIOT.MAP.siid, MIOT.MAP.UPDATE_MAP_DATA, [
@@ -229,7 +241,7 @@ export class MatterCommandHandlers {
       this.assertDreameActionSucceeded('SELECT_MAP', result);
       for (let attempt = 0; attempt < 5; attempt++) {
         if (attempt > 0) await new Promise((resolve) => setTimeout(resolve, 500));
-        this.currentMapId = await this.mapStateProvider();
+        await refreshActiveMap();
         if (this.currentMapId === targetMapId) return;
       }
       throw new Error(`Dreame map ${targetMapId} was not confirmed active; room cleaning was not started`);
@@ -276,7 +288,7 @@ export class MatterCommandHandlers {
       this.assertDreameActionSucceeded('LOCATE', result);
       this.log.debug('LOCATE sent successfully');
     } catch (err: unknown) {
-      this.log.warn(`Dreame locate action failed or is unsupported by this model: ${err instanceof Error ? err.message : String(err)}`);
+      this.log.warn(`Dreame locate action failed or is unsupported by this model: ${safeError(err)}`);
     }
   }
 
@@ -292,7 +304,7 @@ export class MatterCommandHandlers {
     try {
       this.onCleanModeSelected?.(mode);
     } catch (error: unknown) {
-      this.log.warn(`onCleanModeSelected callback threw: ${error instanceof Error ? error.message : String(error)}`);
+      this.log.warn(`onCleanModeSelected callback threw: ${safeError(error)}`);
     }
 
   }

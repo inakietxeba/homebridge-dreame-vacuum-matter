@@ -1,5 +1,5 @@
 import { HomebridgePluginUiServer } from '@homebridge/plugin-ui-utils';
-import { discoverUiRobots } from './devices.js';
+import { discoverUiMaps, discoverUiRobots } from './devices.js';
 
 class UiServer extends HomebridgePluginUiServer {
   constructor() {
@@ -12,6 +12,16 @@ class UiServer extends HomebridgePluginUiServer {
         return await discoverUiRobots(payload);
       } finally {
         loading = false;
+      }
+    });
+    let loadingMaps = false;
+    this.onRequest('/maps', async (payload) => {
+      if (loadingMaps) return { success: false, error: 'Maps are already being loaded. Please wait.' };
+      loadingMaps = true;
+      try {
+        return await discoverUiMaps(payload);
+      } finally {
+        loadingMaps = false;
       }
     });
     this.ready();

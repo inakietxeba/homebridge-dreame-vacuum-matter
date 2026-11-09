@@ -101,13 +101,12 @@ export class DreameCloud {
     });
 
     if (res.status !== 200) {
-      const text = await res.text();
-      throw new Error(`Dreame Cloud login failed (HTTP ${res.status}): ${text}`);
+      throw new Error(`Dreame Cloud login failed (HTTP ${res.status}). Check account credentials and region.`);
     }
 
-    const data = await res.json() as Record<string, unknown>;
+    const data = await this.readJsonResponse(res);
     if (!data['access_token']) {
-      throw new Error(`Dreame Cloud login failed: no access_token. ${JSON.stringify(data)}`);
+      throw new Error('Dreame Cloud login failed: no access token returned. Check account credentials and region.');
     }
 
     this.accessToken = data['access_token'] as string;
@@ -136,7 +135,7 @@ export class DreameCloud {
       throw new Error('Refresh token expired');
     }
 
-    const data = await res.json() as Record<string, unknown>;
+    const data = await this.readJsonResponse(res);
     if (!data['access_token']) {
       this.refreshToken = null;
       throw new Error('Token refresh failed');
@@ -224,12 +223,11 @@ export class DreameCloud {
         }
 
         if (res.status !== 200) {
-          const text = await res.text();
-          lastError = new Error(`API call failed (HTTP ${res.status}): ${text}`);
+          lastError = new Error(`Dreame Cloud API call failed (HTTP ${res.status})`);
           continue;
         }
 
-        const response = await res.json() as Record<string, unknown>;
+        const response = await this.readJsonResponse(res);
         this.failCount = 0;
         this._connected = true;
         return response;
@@ -373,9 +371,20 @@ export class DreameCloud {
       if (err instanceof Error && err.name === 'AbortError') {
         throw new Error(`Dreame Cloud request timed out after ${REQUEST_TIMEOUT_MS / 1000}s`);
       }
-      throw err;
+      throw new Error('Dreame Cloud network request failed. Check the Internet connection and cloud region.');
     } finally {
       clearTimeout(timeout);
+    }
+  }
+
+  private async readJsonResponse(res: Response): Promise<Record<string, unknown>> {
+    try {
+      const data: unknown = await res.json();
+      if (!data || typeof data !== 'object' || Array.isArray(data)) throw new Error();
+      return data as Record<string, unknown>;
+    } catch {
+      // JSON parse errors can quote private response contents.
+      throw new Error('Dreame Cloud returned an invalid JSON response');
     }
   }
 }

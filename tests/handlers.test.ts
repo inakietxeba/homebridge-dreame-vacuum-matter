@@ -512,7 +512,7 @@ describe('MatterCommandHandlers', () => {
     it('refreshes the active map before starting instead of rejecting a stale cached map', async () => {
       handlers.setAreaIdToRoomTargetMap(new Map([[100, { areaId: 100, mapId: 20, segmentId: '7' }]]));
       handlers.syncCurrentMapId(10);
-      const refresh = vi.fn(async () => 20);
+      const refresh = vi.fn(async () => ({ currentMapId: 20, maps: [{ mapId: 20, rooms: [{ id: '7', name: 'Room' }] }] }));
       handlers.setMapStateProvider(refresh);
       await handlers.handleAreaSelection([100]);
       await handlers.handleStartCommand();
@@ -523,7 +523,8 @@ describe('MatterCommandHandlers', () => {
 
     it('selects and confirms a different floor before preparing or starting room cleaning', async () => {
       handlers.setAreaIdToRoomTargetMap(new Map([[100, { areaId: 100, mapId: 20, segmentId: '7' }]]));
-      const refresh = vi.fn().mockResolvedValueOnce(10).mockResolvedValueOnce(20);
+      const maps = [{ mapId: 20, rooms: [{ id: '7', name: 'Room' }] }];
+      const refresh = vi.fn().mockResolvedValueOnce({ currentMapId: 10, maps }).mockResolvedValueOnce({ currentMapId: 20, maps });
       handlers.setMapStateProvider(refresh);
       await handlers.handleAreaSelection([100]);
       await handlers.handleStartCommand();
@@ -537,7 +538,7 @@ describe('MatterCommandHandlers', () => {
 
     it('does not prepare or start cleaning if changing the map is rejected', async () => {
       handlers.setAreaIdToRoomTargetMap(new Map([[100, { areaId: 100, mapId: 20, segmentId: '7' }]]));
-      handlers.setMapStateProvider(async () => 10);
+      handlers.setMapStateProvider(async () => ({ currentMapId: 10, maps: [{ mapId: 20, rooms: [{ id: '7', name: 'Room' }] }] }));
       cloud.action.mockResolvedValueOnce({ code: -1 });
       await handlers.handleAreaSelection([100]);
       await expect(handlers.handleStartCommand()).rejects.toThrow('SELECT_MAP returned Dreame code -1');
@@ -549,7 +550,9 @@ describe('MatterCommandHandlers', () => {
       vi.useFakeTimers();
       try {
         handlers.setAreaIdToRoomTargetMap(new Map([[100, { areaId: 100, mapId: 20, segmentId: '7' }]]));
-        handlers.setMapStateProvider(async () => reportedMap);
+        handlers.setMapStateProvider(async () => ({
+          currentMapId: reportedMap, maps: [{ mapId: 20, rooms: [{ id: '7', name: 'Room' }] }],
+        }));
         await handlers.handleAreaSelection([100]);
         const result = expect(handlers.handleStartCommand()).rejects.toThrow('not confirmed active');
         await vi.advanceTimersByTimeAsync(2_000);
@@ -566,6 +569,15 @@ describe('MatterCommandHandlers', () => {
       handlers.setMapStateProvider(async () => { throw new Error('Map download unavailable'); });
       await handlers.handleAreaSelection([100]);
       await expect(handlers.handleStartCommand()).rejects.toThrow('Map download unavailable');
+      expect(cloud.action).not.toHaveBeenCalled();
+      expect(cloud.setProperties).not.toHaveBeenCalled();
+    });
+
+    it('does not start or change maps when the selected room was removed', async () => {
+      handlers.setAreaIdToRoomTargetMap(new Map([[100, { areaId: 100, mapId: 20, segmentId: '7' }]]));
+      handlers.setMapStateProvider(async () => ({ currentMapId: 20, maps: [{ mapId: 20, rooms: [{ id: '8', name: 'Other' }] }] }));
+      await handlers.handleAreaSelection([100]);
+      await expect(handlers.handleStartCommand()).rejects.toThrow('rooms no longer match');
       expect(cloud.action).not.toHaveBeenCalled();
       expect(cloud.setProperties).not.toHaveBeenCalled();
     });

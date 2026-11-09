@@ -1,3 +1,5 @@
+import { initMapEditor } from './maps.js';
+
 export async function initRobotPicker(homebridge, root = document) {
   homebridge.disableSaveButton();
   const selection = root.getElementById('robot-selection');
@@ -18,6 +20,7 @@ export async function initRobotPicker(homebridge, root = document) {
   const formSchema = structuredClone(schema);
   delete formSchema.schema.properties.deviceSelection;
   delete formSchema.schema.properties.deviceIds;
+  delete formSchema.schema.properties.mapOverrides;
   const form = homebridge.createForm(formSchema, config);
 
   function show(message) { status.textContent = message; }
@@ -33,6 +36,11 @@ export async function initRobotPicker(homebridge, root = document) {
       if (active && version === updateVersion) show('Could not update settings. Close and reopen settings before saving.');
     });
   }
+
+  const mapEditor = initMapEditor(homebridge, root, () => config, (mapOverrides) => {
+    config = { ...config, mapOverrides };
+    return updateConfig();
+  });
 
   function render(focusId) {
     const mode = config.deviceSelection || 'all';
@@ -59,7 +67,7 @@ export async function initRobotPicker(homebridge, root = document) {
       const name = root.createElement('strong');
       name.textContent = device.name;
       const detail = root.createElement('small');
-      detail.className = 'd-block text-muted';
+      detail.className = 'dreame-device-detail dreame-secondary';
       detail.textContent = `${device.model} (${device.id})`;
       label.append(name, detail);
       checkbox.addEventListener('change', () => {
@@ -86,12 +94,13 @@ export async function initRobotPicker(homebridge, root = document) {
 
   form.onChange((change) => {
     const previousAccount = [config.username, config.password, config.country || 'eu'];
-    config = { ...config, ...change, deviceSelection: config.deviceSelection || 'all', deviceIds: config.deviceIds || [] };
+    config = { ...config, ...change, deviceSelection: config.deviceSelection || 'all', deviceIds: config.deviceIds || [], mapOverrides: config.mapOverrides || [] };
     const nextAccount = [config.username, config.password, config.country || 'eu'];
     if (previousAccount.some((value, index) => value !== nextAccount[index])) {
       accountVersion++;
       devices = [];
       fetched = false;
+      mapEditor.setDevices([]);
       render();
       show('Account details changed. Load robots again before changing the selection.');
     }
@@ -117,6 +126,7 @@ export async function initRobotPicker(homebridge, root = document) {
       }
       devices = result.devices;
       fetched = true;
+      mapEditor.setDevices(devices);
       show(devices.length ? 'Check the robots you want to show. Loading this list does not change your selection.' : 'No Dreame robots returned. Your saved selection has not changed.');
     } catch {
       if (active && version === accountVersion) show('Could not load robots. Check your account details and retry. Your selection has not changed.');
@@ -135,5 +145,5 @@ export async function initRobotPicker(homebridge, root = document) {
   load.disabled = false;
   homebridge.enableSaveButton();
   show('Load robots to choose them by name. Existing selection is preserved until you change it.');
-  return { form, flush: () => updates, dispose: () => { active = false; form.end(); } };
+  return { form, flush: () => updates, dispose: () => { active = false; mapEditor.dispose(); form.end(); } };
 }

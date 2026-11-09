@@ -162,6 +162,9 @@ describe('Command regressions with real handlers', () => {
     await handlers.handleAreaSelection([areaId]);
     expect(accessory.getCurrentState().activity.selectedRooms).toEqual(['1']);
     expect(MatterClusterMapper.buildServiceArea(accessory.getCurrentState())!.selectedAreas).toEqual([areaId]);
+    accessory.applyActiveMapId(10);
+    expect(MatterClusterMapper.buildServiceArea(accessory.getCurrentState())!.supportedAreas.find((area) => area.mapId === 20)!.areaId).toBe(areaId);
+    expect(MatterClusterMapper.buildServiceArea(accessory.getCurrentState())!.selectedAreas).toEqual([areaId]);
     await handlers.handleAreaSelection([]);
     expect(MatterClusterMapper.buildServiceArea(accessory.getCurrentState())!.selectedAreas).toEqual([]);
     accessory.dispose();

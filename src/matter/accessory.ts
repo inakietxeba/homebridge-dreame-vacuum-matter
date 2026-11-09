@@ -6,12 +6,13 @@ import type {
 import { isDeepStrictEqual } from 'node:util';
 
 import { CleaningMode, CleaningProfile } from '../config.js';
-import { MapRooms, NormalizedState } from '../dreame/models.js';
+import { NormalizedState } from '../dreame/models.js';
 import { MatterClusterMapper, MatterState } from './clusters.js';
 import { Logger } from '../util/logger.js';
 
 export interface DreameVacuumAccessoryOptions {
   disableMatterStatePush?: boolean;
+  robotName?: string;
 }
 
 /** Detects transient Matter session errors that may self-resolve. */
@@ -53,6 +54,30 @@ export class DreameVacuumAccessory {
   private transientSessionBackoffUntil = 0;
   private hasLoggedSessionBackoff = false;
   private readonly unsupportedClustersLogged = new Set<string>();
+  private syncWarningStarted?: number;
+  private syncWarningLast = 0;
+  private syncWarningKind = '';
+  private syncWarningFailures = 0;
+
+  private warnSync(kind: string, message: string): void {
+    const now = Date.now();
+    this.syncWarningStarted ??= now;
+    this.syncWarningFailures++;
+    if (this.syncWarningFailures === 1 || kind !== this.syncWarningKind || now - this.syncWarningLast >= 300_000) {
+      this.platformLogger.warn(message);
+      this.syncWarningLast = now;
+      this.syncWarningKind = kind;
+    }
+  }
+
+  private reportSyncRecovery(): void {
+    if (this.syncWarningStarted === undefined) return;
+    this.platformLogger.info(`Matter state synchronization recovered after ${this.syncWarningFailures} failures (${Math.round((Date.now() - this.syncWarningStarted) / 1000)}s).`);
+    this.syncWarningStarted = undefined;
+    this.syncWarningFailures = 0;
+    this.syncWarningLast = 0;
+    this.syncWarningKind = '';
+  }
 
   private static readonly SYNC_DEBOUNCE_MS = 100;
   private static readonly INITIAL_REGISTRATION_SYNC_DELAY_MS = 5_000;
@@ -69,14 +94,14 @@ export class DreameVacuumAccessory {
     options?: DreameVacuumAccessoryOptions,
   ) {
     this.currentState = initialState;
-    this.platformLogger = new Logger(platformLog, 'MatterAccessory');
+    this.platformLogger = options?.robotName ? new Logger(platformLog, 'MatterAccessory').forRobot(options.robotName) : new Logger(platformLog, 'MatterAccessory');
     this.matterStatePushEnabled = !options?.disableMatterStatePush;
   }
 
   public markRegistered(): void {
     if (this.isRegistered || this.disposed) return;
     this.isRegistered = true;
-    this.platformLogger.debug(`Matter accessory ${this.uuid} marked registered`);
+    this.platformLogger.debug('Matter accessory marked registered');
     this.registrationSyncTimer = setTimeout(() => {
       this.registrationSyncTimer = undefined;
       this.requestSync();
@@ -145,11 +170,12 @@ export class DreameVacuumAccessory {
     this.requestSync();
   }
 
-  public applyMapState(maps: MapRooms[], currentMapId: number | undefined): void {
+  public applyActiveMapId(currentMapId: number | undefined): void {
     if (this.disposed) return;
-    this.currentState.activity.knownMaps = maps;
-    this.currentState.activity.currentMapId = currentMapId;
-    this.currentState.activity.availableRooms = maps.find((map) => map.mapId === currentMapId)?.rooms ?? [];
+    // Keep the published area IDs and their command targets aligned for this session.
+    const activity = this.currentState.activity;
+    activity.currentMapId = currentMapId;
+    activity.availableRooms = activity.knownMaps.find((map) => map.mapId === currentMapId)?.rooms ?? [];
     this.requestSync();
   }
 
@@ -187,7 +213,7 @@ export class DreameVacuumAccessory {
       if (!this.matterStatePushEnabled) return;
 
       if (!this.isRegistered) {
-        this.platformLogger.debug(`Skipping Matter state push for ${this.uuid}; accessory not yet registered.`);
+        this.platformLogger.debug('Skipping Matter state push; accessory not yet registered.');
         return;
       }
 
@@ -208,7 +234,7 @@ export class DreameVacuumAccessory {
         this.scheduleSyncRetry(this.transientSessionBackoffUntil - now);
         if (!this.hasLoggedSessionBackoff) {
           const seconds = Math.ceil((this.transientSessionBackoffUntil - now) / 1000);
-          this.platformLogger.debug(`Skipping Matter state push for ${this.uuid}; waiting ${seconds}s after transient session error.`);
+          this.platformLogger.debug(`Skipping Matter state push; waiting ${seconds}s after transient session error.`);
           this.hasLoggedSessionBackoff = true;
         }
         return;
@@ -262,7 +288,7 @@ export class DreameVacuumAccessory {
       // Process results
       const anySucceeded = results.some((r) => r.kind === 'pushed');
       if (anySucceeded) {
-        this.platformLogger.debug(`Matter state sent for ${this.uuid}: ${JSON.stringify({
+        this.platformLogger.debug(`Matter state sent: ${JSON.stringify({
           RvcRunMode: {
             currentMode: matterState.RvcRunMode.currentMode,
           },
@@ -289,8 +315,8 @@ export class DreameVacuumAccessory {
       const shouldRetryRegistration = results.some((r) => r.kind === 'retry');
       if (shouldRetryRegistration) {
         this.syncRetryAttempts += 1;
-        if (this.syncRetryAttempts === 1 || this.syncRetryAttempts % 5 === 0) {
-          this.platformLogger.warn(
+        {
+          this.warnSync('readiness',
             `Matter state sync is waiting for accessory registration/session readiness (attempt ${this.syncRetryAttempts}).`,
           );
         }
@@ -304,7 +330,7 @@ export class DreameVacuumAccessory {
           this.platformLogger.debug(`Cluster ${r.cluster} not supported — skipping`);
           this.unsupportedClustersLogged.add(r.cluster);
         } else if (r.kind === 'failed') {
-          this.platformLogger.warn(`Failed to push ${r.cluster}: ${r.message}`);
+          this.warnSync(`cluster:${r.cluster}`, `Failed to push ${r.cluster}; Matter state may be delayed.`);
         }
       }
 
@@ -313,7 +339,7 @@ export class DreameVacuumAccessory {
         this.consecutiveSessionErrors += 1;
         if (this.consecutiveSessionErrors >= DreameVacuumAccessory.SESSION_ERROR_THRESHOLD) {
           this.matterStatePushEnabled = false;
-          this.platformLogger.warn(
+          this.warnSync('session',
             `Pausing Matter state pushes after ${this.consecutiveSessionErrors} session errors. `
             + `Auto-recovery in ${DreameVacuumAccessory.SESSION_RECOVERY_DELAY_MS / 1000}s.`,
           );
@@ -323,7 +349,7 @@ export class DreameVacuumAccessory {
         this.transientSessionBackoffUntil = Date.now() + 30_000;
         this.hasLoggedSessionBackoff = false;
         this.scheduleSyncRetry(30_000);
-        this.platformLogger.debug(`Matter session expired for ${this.uuid}; pausing state pushes briefly while the controller reconnects.`);
+        this.platformLogger.debug('Matter session expired; pausing state pushes briefly while the controller reconnects.');
         return;
       } else if (anySucceeded) {
         this.consecutiveSessionErrors = 0;
@@ -336,15 +362,15 @@ export class DreameVacuumAccessory {
       }
 
       if (anySucceeded) {
+        if (!results.some((r) => r.kind === 'session-error' || r.kind === 'retry' || r.kind === 'failed')) this.reportSyncRecovery();
         this.lastSyncedMatterState = structuredClone(matterState);
         this.syncRetryAttempts = 0;
         this.transientSessionBackoffUntil = 0;
         this.hasLoggedSessionBackoff = false;
       }
       this.syncRetryDelayMs = 2000;
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : String(err);
-      this.platformLogger.warn(`State sync failed: ${message}`);
+    } catch {
+      this.warnSync('sync', 'Matter state sync failed; updates will be retried.');
 
       this.scheduleSyncRetry(this.syncRetryDelayMs);
       this.syncRetryDelayMs = Math.min(30_000, this.syncRetryDelayMs * 2);
